@@ -201,6 +201,12 @@ uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
     ASSERTION(cp == strlen(flows), "IO error!");
 }
 
+void
+uncall_context_destroy(uncall_context_t *ctx) {
+    free(ctx->flow_buf);
+    free(ctx->dup_book);
+}
+
 static int
 construct_flow_data(uncall_context_t *ctx) {
     unw_context_t uctx;

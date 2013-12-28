@@ -33,4 +33,7 @@ main(int argc, const char *argv[]) {
         path2();
         path1();
     }
+
+    uncall_context_destroy(&ctx);
+    close(logfd);
 }
