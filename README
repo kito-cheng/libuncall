@@ -1,5 +1,5 @@
 DOWNLOAD:
  - https://bitbucket.org/thinker/libuncall
 
-REQUIRE:
+DEPENDENCIES:
  - https://github.com/eliben/pyelftools
