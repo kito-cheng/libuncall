@@ -1,4 +1,6 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+#include "uncall.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -7,38 +9,14 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#include <libunwind.h>
-
 
 #ifndef ASSERTION
 #define ASSERTION(x, reason) if (!(x)) { abort(); }
 #endif
 
-struct RC4_state {
-    int i, j;
-    unsigned char S[256];
-};
-
-typedef struct RC4_state RC4_state_t;
-
 #define UNC_DUP_BOOK_SIZE_START 256
 #define UNC_DUP_BOOK_SIZE_MAX (256*256)
 #define UNC_DUP_BOOK_BUCKET_SIZE 8
-
-struct uncall_context {
-    int max_depth;
-    unw_word_t *flow_buf;
-
-    int dup_book_size;
-    uint32_t *dup_book;
-
-    RC4_state_t rc4_init;    /* initial state of rc4 */
-    RC4_state_t rc4;         /* copied from rc4_init for every flow */
-
-    int logfd;
-};
-
-typedef struct uncall_context uncall_context_t;
 
 void
 RC4_KSA(RC4_state_t *rc4, const unsigned char *key, int key_size) {
@@ -165,7 +143,7 @@ log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
     char buf[32];
 
     for (i = 0; i < size; i++) {
-        sprintf(buf, "0x%llx ", flow[i]);
+        sprintf(buf, "0x%lx ", flow[i]);
         datasz = strlen(buf);
         if (i == (size - 1))
             buf[datasz - 1] = '\n';
@@ -197,15 +175,15 @@ write_out_maps(uncall_context_t *ctx) {
     }
     ASSERTION(rdsz >= 0, "IO error!");
 
-    wrsz = write(ctx->logfd, "\n", 1);
-    ASSERTION(rdsz >= 0, "IO error!");
-
     close(mapsfd);
 }
 
 void
 uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
     static const unsigned char key[] = "libuncall";
+    static const char flows[] = "\nFLOWS:\n";
+    int cp;
+
     bzero(ctx, sizeof(uncall_context_t));
 
     ctx->max_depth = max_depth;
@@ -219,6 +197,8 @@ uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
     ctx->logfd = logfd;
 
     write_out_maps(ctx);
+    cp = write(ctx->logfd, flows, strlen(flows));
+    ASSERTION(cp == strlen(flows), "IO error!");
 }
 
 static int
@@ -235,6 +215,8 @@ construct_flow_data(uncall_context_t *ctx) {
     unw_getcontext(&uctx);
     unw_init_local(&cursor, &uctx);
     remain_frames = unw_step(&cursor); /* skip current frame */
+    ASSERTION(remain_frames > 0, "unwinding error!");
+    remain_frames = unw_step(&cursor); /* skip uncall frame */
     ASSERTION(remain_frames >= 0, "unwinding error!");
 
     do {
