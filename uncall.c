@@ -18,7 +18,10 @@
 #define UNC_DUP_BOOK_SIZE_MAX (256*256)
 #define UNC_DUP_BOOK_BUCKET_SIZE 8
 
-void
+#define IO_BUF_SIZE 1024
+
+
+static void
 RC4_KSA(RC4_state_t *rc4, const unsigned char *key, int key_size) {
     int i, j;
     unsigned char *S = rc4->S;
@@ -32,7 +35,7 @@ RC4_KSA(RC4_state_t *rc4, const unsigned char *key, int key_size) {
     }
 }
 
-void
+static void
 RC4_KSA_feed(RC4_state_t *rc4, const unsigned char *key, int key_size) {
     int i, j;
     int cnt;
@@ -53,7 +56,7 @@ RC4_KSA_feed(RC4_state_t *rc4, const unsigned char *key, int key_size) {
     rc4->j = j;
 }
 
-void
+static void
 RC4_init(RC4_state_t *rc4, const unsigned char *key, int key_size) {
     int i;
     unsigned char *S = rc4->S;
@@ -66,7 +69,7 @@ RC4_init(RC4_state_t *rc4, const unsigned char *key, int key_size) {
     RC4_KSA(rc4, key, key_size);
 }
 
-unsigned char
+static unsigned char
 RC4_PRGA(RC4_state_t *rc4) {
     unsigned char *S = rc4->S;
     unsigned char K;
@@ -151,16 +154,18 @@ log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
     }
 }
 
-#define IO_BUF_SIZE 1024
-
 static void
 write_out_maps(uncall_context_t *ctx) {
+    static const char maps[] = "MAPS:\n";
     int mapsfd, rdsz, wrsz, remain;
     char buf[IO_BUF_SIZE];
     char *ptr;
 
     mapsfd = open("/proc/self/maps", O_RDONLY);
     ASSERTION(mapsfd >= 0, "incompatible paltform!");
+
+    wrsz = write(ctx->logfd, maps, strlen(maps));
+    ASSERTION(wrsz == strlen(maps), "IO error!");
 
     while ((rdsz = read(mapsfd, buf, IO_BUF_SIZE)) > 0) {
         remain = rdsz;
@@ -181,7 +186,7 @@ write_out_maps(uncall_context_t *ctx) {
 void
 uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
     static const unsigned char key[] = "libuncall";
-    static const char flows[] = "\nFLOWS:\n";
+    static const char flows[] = "FLOWS:\n";
     int cp;
 
     bzero(ctx, sizeof(uncall_context_t));

@@ -28,7 +28,7 @@ main(int argc, const char *argv[]) {
     logfd = open("basic_flow.log", O_RDWR | O_CREAT | O_TRUNC, 0666);
     uncall_context_init(&ctx, 16, logfd);
 
-    for (i = 0; i < 20; i++) {
+    for (i = 0; i < 10000; i++) {
         path1();
         path2();
         path1();
