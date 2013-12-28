@@ -172,16 +172,6 @@ if __name__ == '__main__':
     filename = sys.argv[1]
     log = uncall_log()
     log.load(filename)
-    print 'MAPS:'
-    pprint.pprint(log.maps._maps, indent=2)
-    print 'FLOWS:'
-    pprint.pprint(log.flows._flows, indent=2)
     
-    print 'LOOKUPS:'
-    address = log.flows[0][0]
-    print '0x%x: %s' % (address, log.maps.lookup_address_rel(address))
-    address = log.flows[0][3]
-    print '0x%x: %s' % (address, log.maps.lookup_address_rel(address))
-
     print_flows_symbols(log)
     pass
