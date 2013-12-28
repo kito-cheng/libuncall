@@ -112,6 +112,13 @@ bookmark_grow(uncall_context_t *ctx) {
 }
 
 /**
+ * Check and remember if a flow is already previously existing.
+ *
+ * The flow code of a flow is the digest of the call flow.  It is used
+ * to identify and detect if a call flow is duplicated.  The RC4
+ * algorithm is used to generate the flow codes.
+ *
+ * \param code is the flow code of the flow.
  * \return 0 for a new flow, 1 for an existing flow.
  */
 static int
@@ -140,6 +147,9 @@ bookmark_flow_code(uncall_context_t *ctx, uint32_t code) {
     return 0;
 }
 
+/**
+ * Write out a call flow to the log file.
+ */
 static void
 log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
     int i, datasz;
@@ -154,6 +164,9 @@ log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
     }
 }
 
+/**
+ * Write out memory map of the current process to the log file.
+ */
 static void
 write_out_maps(uncall_context_t *ctx) {
     static const char maps[] = "MAPS:\n";
@@ -183,6 +196,12 @@ write_out_maps(uncall_context_t *ctx) {
     close(mapsfd);
 }
 
+/**
+ * Initialize the uncall context.
+ *
+ * \param max_depth is the maximum number of the frames being recoreded.
+ * \param logfd is the file descriptor of the log file.
+ */
 void
 uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
     static const unsigned char key[] = "libuncall";
@@ -206,12 +225,18 @@ uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
     ASSERTION(cp == strlen(flows), "IO error!");
 }
 
+/**
+ * Destroy the content of the uncall context.
+ */
 void
 uncall_context_destroy(uncall_context_t *ctx) {
     free(ctx->flow_buf);
     free(ctx->dup_book);
 }
 
+/**
+ * Make flow data on ctx->flow_buf and return the size.
+ */
 static int
 construct_flow_data(uncall_context_t *ctx) {
     unw_context_t uctx;
@@ -240,6 +265,12 @@ construct_flow_data(uncall_context_t *ctx) {
     return next_flow_idx;
 }
 
+/**
+ * Log the call flow of the current thread.
+ *
+ * Eliminate duplications of flows, every call path would be written
+ * out exactly one time.
+ */
 void
 uncall(uncall_context_t *ctx) {
     unw_word_t *flow;
