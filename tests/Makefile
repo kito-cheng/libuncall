@@ -7,3 +7,6 @@ basic_flow: basic_flow.o ../uncall.c
 
 basic_flow.o: basic_flow.c
 	$(CC) -g -c $^
+
+clean:
+	rm -rf *~ $(BINs) *.o *.log
