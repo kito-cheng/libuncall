@@ -39,4 +39,5 @@ _uncallutils_deinit() {
         return;
 
     uncall_context_destroy(_uncallutils_context);
+    close(logfd);
 }
