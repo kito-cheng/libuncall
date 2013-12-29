@@ -1,3 +1,64 @@
+libuncall is an instrument for developers to understand who is calling
+and how to be called a given piece of code.  The developers add some
+simple instrument code in their code base and rebuild their code to
+get a copy of binary with instruments.  Once you enable the instrument
+code and run the target code, libuncall starts to collect call flows,
+a.k.a backtrace, of instrument codes.
+
+HOW TO:
+
+Include uncallutils.h in your code, and call UNCALL() at the lines
+where you want to collect their call flows.  And, call UNCALL_INIT()
+and UNCALL_DEINIT() at main() function to initialize libuncall.  Then,
+compile and link your code with libuncallutils.so.
+
+tests/uncallutils-test.c is an example of add instruments for your
+code.
+
+If you do nothing special to run your code, we just find nothing
+happened, just very very little overhead of flag checking code for
+your code.  But, once you set the environ variable
+LD_PRELOAD=/path/to/libuncalutils-enable.so, libuncall generate a log
+file, uncallutils.log, to collect call flows at run time.
+
+You could read the log file, but it is not easy to be read.
+tools/uncallog.py help you to understand the log file by translating
+data in the log to the filename, line number, and function name.
+
+Following is an example of running tools/uncalllog.py for
+tests/uncallutils-test.
+
+  tests$ env LD_PRELOAD=../libuncallutils-enable.so LD_LIBRARY_PATH=../ \
+  ./uncallutils-test 
+  tests$ ls
+  Makefile    basic_flow.c  uncallutils-test    uncallutils-test.o
+  basic_flow  basic_flow.o  uncallutils-test.c  uncallutils.log
+  tests$ env PYTHONPATH=/path/to/pyelftools/ python \
+  ../tools/uncalllog.py uncallutils.log 
+  FLOW:
+  uncallutils-test.c:5:target()
+  uncallutils-test.c:9:path1()
+  uncallutils-test.c:23:main()
+  /lib/x86_64-linux-gnu/libc-2.17.so:?:0x7fe1af766995
+  /home/thinker/progm/libuncall/tests/uncallutils-test:?:0x4006d9
+  
+  FLOW:
+  uncallutils-test.c:5:target()
+  uncallutils-test.c:13:path2()
+  uncallutils-test.c:24:main()
+  /lib/x86_64-linux-gnu/libc-2.17.so:?:0x7fe1af766995
+  /home/thinker/progm/libuncall/tests/uncallutils-test:?:0x4006d9
+  
+  FLOW:
+  uncallutils-test.c:5:target()
+  uncallutils-test.c:9:path1()
+  uncallutils-test.c:25:main()
+  /lib/x86_64-linux-gnu/libc-2.17.so:?:0x7fe1af766995
+  /home/thinker/progm/libuncall/tests/uncallutils-test:?:0x4006d9
+  
+  test$ 
+
+
 DOWNLOAD:
  - https://bitbucket.org/thinker/libuncall
 
