@@ -28,6 +28,11 @@ data in the log to the filename, line number, and function name.
 Following is an example of running tools/uncalllog.py for
 tests/uncallutils-test.
 
+  tests$ make
+  cc -g -c basic_flow.c
+  cc -g -o basic_flow basic_flow.o ../uncall.c -lunwind -lunwind-x86_64
+  cc -g -c uncallutils-test.c
+  cc -o uncallutils-test uncallutils-test.o -luncallutils -L../
   tests$ env LD_PRELOAD=../libuncallutils-enable.so LD_LIBRARY_PATH=../ \
   ./uncallutils-test 
   tests$ ls
