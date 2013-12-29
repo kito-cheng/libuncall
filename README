@@ -5,6 +5,8 @@ get a copy of binary with instruments.  Once you enable the instrument
 code and run the target code, libuncall starts to collect call flows,
 a.k.a backtrace, of instrument codes.
 
+Thinker <thinker@codemud.net>
+
 HOW TO:
 
 Include uncallutils.h in your code, and call UNCALL() at the lines
