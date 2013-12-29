@@ -1,4 +1,4 @@
-BINS = basic_flow uncallutils-test libuncallutils.so
+BINS = basic_flow uncallutils-test
 LIBS = -lunwind -lunwind-x86_64
 
 all: $(BINS)
@@ -11,9 +11,6 @@ basic_flow.o: basic_flow.c
 
 uncallutils-test: uncallutils-test.o
 	$(CC) -o $@ uncallutils-test.o -luncallutils -L../
-
-libuncallutils.so: ../libuncallutils-empty.so
-	ln -f -s ../libuncallutils-empty.so $@
 
 .c.o:
 	$(CC) -g -c $^

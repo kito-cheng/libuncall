@@ -11,7 +11,7 @@
 
 #define LOG_FILE "uncallutils.log"
 
-int _uncallutils_existing = 1;
+int _uncallutils_existing = 0;
 
 uncall_context_t *_uncallutils_context = NULL;
 static int logfd;

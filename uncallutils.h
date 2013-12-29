@@ -4,8 +4,8 @@
 
 typedef struct uncall_context uncall_context_t;
 
-extern void uncall(uncall_context_t *) __attribute__((weak));
-extern uncall_context_t *_uncallutils_context __attribute__((weak));
+extern void uncall(uncall_context_t *);
+extern uncall_context_t *_uncallutils_context;
 extern int _uncallutils_existing;
 
 #define UNCALL()                      \
@@ -14,8 +14,8 @@ extern int _uncallutils_existing;
     }
 
 
-extern void _uncallutils_init() __attribute__((weak));
-extern void _uncallutils_deinit() __attribute__((weak));
+extern void _uncallutils_init();
+extern void _uncallutils_deinit();
 
 #define UNCALL_INIT() \
     if (_uncallutils_existing) { _uncallutils_init(); }

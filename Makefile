@@ -1,4 +1,4 @@
-BINS = libuncallutils-impl.so libuncallutils-empty.so libuncallutils.so
+BINS = libuncallutils-impl.so libuncallutils-enable.so libuncallutils.so
 LIBS = -lunwind -lunwind-x86_64
 
 all: $(BINS)
@@ -6,7 +6,7 @@ all: $(BINS)
 libuncallutils-impl.so: uncallutils.o uncall.o
 	$(CC) -o $@ -shared $^ $(LIBS)
 
-libuncallutils-empty.so: libuncallutils-empty.o
+libuncallutils-enable.so: libuncallutils-enable.o
 	$(CC) -o $@ -shared $^ 
 
 libuncallutils.so: libuncallutils-impl.so
