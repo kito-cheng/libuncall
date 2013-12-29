@@ -31,6 +31,10 @@ public:
         mValue = aOther.mValue;
     }
 
+    T operator ->() {
+        return mValue;
+    }
+
     operator T() const {
         return mValue;
     }
@@ -61,6 +65,11 @@ public:
         mValue = aOther.mValue;
     }
 
+    T operator ->() {
+        UNCALL();
+        return mValue;
+    }
+
     operator T() const {
         UNCALL();
         return mValue;
@@ -87,6 +96,11 @@ public:
     UNCALL_VARRW &operator =(UNCALL_VARRW &aOther) {
         UNCALL();
         mValue = aOther.mValue;
+    }
+
+    T operator ->() {
+        UNCALL();
+        return mValue;
     }
 
     operator T() const {
