@@ -133,6 +133,22 @@ def print_flows_symbols(log):
     pass
 
 
+def get_name(DIE):
+    if DIE.attributes.has_key('DW_AT_MIPS_linkage_name'):
+        return DIE.attributes['DW_AT_MIPS_linkage_name'].value
+    return DIE.attributes['DW_AT_name'].value
+
+def find_spec_name(CU, spec_off):
+    for DIE in CU.iter_DIEs():
+        if DIE.offset == spec_off:
+            try:
+                return get_name(DIE)
+            except KeyError:
+                pass
+            pass
+        pass
+    pass
+
 def decode_func_name(dwarf, addr):
     for CU in dwarf.iter_CUs():
         for DIE in CU.iter_DIEs():
@@ -142,7 +158,12 @@ def decode_func_name(dwarf, addr):
                 lowpc = DIE.attributes['DW_AT_low_pc'].value
                 hipc = DIE.attributes['DW_AT_high_pc'].value
                 if lowpc <= addr <= hipc:
-                    return DIE.attributes['DW_AT_name'].value
+                    try:
+                        return get_name(DIE)
+                    except KeyError:
+                        spec_off = DIE.attributes['DW_AT_specification'].value
+                        return find_spec_name(CU, spec_off)
+                        pass
                 pass
             except KeyError:
                 pass
