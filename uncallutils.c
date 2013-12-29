@@ -1,5 +1,6 @@
 /* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 #include "uncall.h"
+#include "uncallutils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +10,8 @@
 
 
 #define LOG_FILE "uncallutils.log"
+
+int _uncallutils_existing = 1;
 
 uncall_context_t *_uncallutils_context = NULL;
 static int logfd;
