@@ -10,6 +10,7 @@
 
 
 #define LOG_FILE "uncallutils.log"
+#define MAX_DEPTH 16
 
 int _uncallutils_existing = 0;
 
@@ -29,7 +30,7 @@ _uncallutils_init() {
     }
 
     _uncallutils_context = &context;
-    uncall_context_init(_uncallutils_context, 16, logfd);
+    uncall_context_init(_uncallutils_context, MAX_DEPTH, logfd);
 }
 
 void
