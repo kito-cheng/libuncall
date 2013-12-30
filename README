@@ -7,7 +7,7 @@ a.k.a backtrace, of instrument codes.
 
  -- Thinker <thinker@codemud.net>
 
-HOW TO:
+== HOW TO ==
 
 Include uncallutils.h in your code, and call UNCALL() at the lines
 where you want to collect their call flows.  And, call UNCALL_INIT()
@@ -66,9 +66,11 @@ tests/uncallutils-test.
   test$ 
 
 
-DOWNLOAD:
+== DOWNLOAD ==
+
  - https://bitbucket.org/thinker/libuncall
 
-DEPENDENCIES:
+== DEPENDENCIES ==
+
  - https://github.com/eliben/pyelftools
  - libunwind
