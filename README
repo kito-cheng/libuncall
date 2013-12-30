@@ -71,4 +71,4 @@ DOWNLOAD:
 
 DEPENDENCIES:
  - https://github.com/eliben/pyelftools
- - libwind
+ - libunwind
