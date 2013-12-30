@@ -152,16 +152,27 @@ bookmark_flow_code(uncall_context_t *ctx, uint32_t code) {
  */
 static void
 log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
-    int i, datasz;
-    char buf[32];
+    int buf_size;
+    char *buf, *buf_free;
+    int i, cp, data_sz;
 
+    buf_size = size * 19 + 1;   // The max size of 0xXXXX is 18 bytes.
+    buf = (char*)malloc(buf_size);
+
+    buf_free = buf;
     for (i = 0; i < size; i++) {
-        sprintf(buf, "0x%lx ", flow[i]);
-        datasz = strlen(buf);
-        if (i == (size - 1))
-            buf[datasz - 1] = '\n';
-        write(ctx->logfd, buf, datasz);
+        sprintf(buf_free, "0x%lx ", flow[i]);
+        cp = strlen(buf_free);
+        buf_free += cp;
     }
+    data_sz = buf_free - buf;
+
+    if (data_sz > 0) {
+        *(buf_free - 1) = '\n';
+        write(ctx->logfd, buf, data_sz);
+    }
+
+    free(buf);
 }
 
 /**
