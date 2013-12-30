@@ -161,6 +161,7 @@ log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
 
     buf_free = buf;
     for (i = 0; i < size; i++) {
+        if (flow[i] == 0) break;
         sprintf(buf_free, "0x%lx ", flow[i]);
         cp = strlen(buf_free);
         buf_free += cp;
