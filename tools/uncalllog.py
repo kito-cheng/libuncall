@@ -1,5 +1,6 @@
 # -*- Mode: python; tab-width: 4; indent-tab-mode: nil; py-indent-offset: 4 -*-
 from elftools.elf.elffile import ELFFile
+from elftools.elf.enums import ENUM_E_TYPE
 import re
 
 
@@ -40,8 +41,11 @@ class maps(object):
         pass
 
     def lookup_address_rel(self, address):
-        start, stop, filename = self.lookup_address(address)
-        return address - start, filename
+        value = self.lookup_address(address)
+        if value is not None:
+            start, stop, filename = value
+            return address - start, filename
+        pass
     pass
 
 
@@ -100,26 +104,36 @@ def print_flows_symbols(log):
         print 'FLOW:'
         flow = log.flows[i]
         for addr in flow:
-            rel, so = log.maps.lookup_address_rel(addr)
+            value = log.maps.lookup_address_rel(addr)
+            if value is None:
+                print '?:?:0x%x' % (addr)
+                continue
+            rel, so = value
             try:
                 elf = elfs[so]
             except:
                 fo = file(so, 'rb')
                 elf = ELFFile(fo)
                 if not elf.has_dwarf_info():
-                    print '%s:?:0x%x' % (so, addr)
+                    print '%s:?:0x%x(rel:0x%x)' % (so, addr, rel)
                     continue
                     # raise '%s: no dwarf information!' % so
                 elfs[so] = elf
+                elf.cache_dwarf = elf.get_dwarf_info()
                 pass
 
-            laddr = addr - 1              # for x86, IP is at next opcode.
-            dwarf = elf.get_dwarf_info()
+            if elf['e_type'] == 'ET_EXEC':
+                laddr = addr - 1      # for x86, IP is at next opcode.
+            else:
+                laddr = rel - 1       # for x86, IP is at next opcode.
+                pass
+            
+            dwarf = elf.cache_dwarf
             func_name = decode_func_name(dwarf, laddr)
             if func_name:
                 func_name = func_name + '()'
             else:
-                func_name = '0x%x' % addr
+                func_name = '0x%x(rel:0x%x)' % (addr, rel)
                 pass
             try:
                 filename, line = decode_file_line(dwarf, laddr)
@@ -208,32 +222,70 @@ def find_spec_name(CU, spec_off):
         pass
     pass
 
-def decode_func_name(dwarf, addr):
-    for CU in dwarf.iter_CUs():
-        for DIE in CU.iter_DIEs():
-            try:
-                if DIE.tag != 'DW_TAG_subprogram':
-                    continue
-                lowpc = DIE.attributes['DW_AT_low_pc'].value
-                hipc = DIE.attributes['DW_AT_high_pc'].value
-                if lowpc <= addr <= hipc:
-                    try:
-                        return get_name(DIE)
-                    except KeyError:
-                        spec_off = DIE.attributes['DW_AT_specification'].value
-                        return find_spec_name(CU, spec_off)
-                        pass
-                pass
-            except KeyError:
+def decode_func_name_CU(CU, addr):
+    for DIE in CU.iter_DIEs():
+        try:
+            if DIE.tag != 'DW_TAG_subprogram':
+                continue
+            lowpc = DIE.attributes['DW_AT_low_pc'].value
+            hipc = DIE.attributes['DW_AT_high_pc'].value
+            if lowpc <= addr <= hipc:
+                try:
+                    return get_name(DIE)
+                except KeyError:
+                    spec_off = DIE.attributes['DW_AT_specification'].value
+                    spec_off = spec_off + CU.cu_offset
+                    return find_spec_name(CU, spec_off)
                 pass
             pass
+        except KeyError:
+            pass
+        pass
+    pass
+
+
+def check_addr_in_CU(CU, addr):
+    dwarf = CU.dwarfinfo
+    try:
+        range_lists = dwarf.range_lists_cache
+    except AttributeError:
+        range_lists = dwarf.range_lists()
+        dwarf.range_lists_cache = range_lists
+        pass
+    DIE = CU.get_top_DIE()
+    try:
+        ranges_offset = DIE.attributes['DW_AT_ranges'].value
+        range_list = range_lists.get_range_list_at_offset(ranges_offset)
+        for entry in range_list:
+            if entry.begin_offset <= addr < entry.end_offset:
+                return True
+            pass
+        pass
+    except KeyError:
+        pass
+    return False
+
+
+def decode_func_name(dwarf, addr):
+    for CU in dwarf.iter_CUs():
+        if check_addr_in_CU(CU, addr):
+            return decode_func_name_CU(CU, addr)
         pass
     pass
 
 
 def decode_file_line(dwarf, addr):
     for CU in dwarf.iter_CUs():
-        lineprog = dwarf.line_program_for_CU(CU)
+        if not check_addr_in_CU(CU, addr):
+            continue
+        
+        try:
+            lineprog = CU.lineprog_cache
+        except:
+            lineprog = dwarf.line_program_for_CU(CU)
+            CU.lineprog_cache = lineprog
+            pass
+        
         prevstate = None
         for entry in lineprog.get_entries():
             if entry.state is None or entry.state.end_sequence:
@@ -247,11 +299,12 @@ def decode_file_line(dwarf, addr):
         pass
     pass
 
+
 if __name__ == '__main__':
     import sys, pprint
     filename = sys.argv[1]
     log = uncall_log()
     log.load(filename)
-    
+
     print_flows_symbols(log)
     pass
