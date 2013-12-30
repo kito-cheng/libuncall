@@ -98,11 +98,16 @@ class uncall_log(object):
 
 def print_flows_symbols(log):
     elfs = {}
+    result_cache = {}
     
     for i in range(len(log.flows)):
         print 'FLOW:'
         flow = log.flows[i]
         for addr in flow:
+            if addr in result_cache:
+                print '%s:%s:%s' % result_cache[addr]
+                continue
+            
             value = log.maps.lookup_address_rel(addr)
             if value is None:
                 print '?:?:0x%x' % (addr)
@@ -140,6 +145,8 @@ def print_flows_symbols(log):
                 filename, line = so, '?'
                 pass
             print '%s:%s:%s' % (filename, line, func_name)
+            
+            result_cache[addr] = (filename, line, func_name)
             pass
         print
         pass
