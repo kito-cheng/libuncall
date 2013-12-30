@@ -26,12 +26,12 @@ public:
         mValue = aValue;
     }
 
-    UNCALL_VARW &operator =(UNCALL_VARW &aOther) {
+    UNCALL_VARW &operator =(const UNCALL_VARW &aOther) {
         UNCALL();
         mValue = aOther.mValue;
     }
 
-    T operator ->() {
+    T operator ->() const {
         return mValue;
     }
 
@@ -61,11 +61,11 @@ public:
         mValue = aValue;
     }
 
-    UNCALL_VARR &operator =(UNCALL_VARR &aOther) {
+    UNCALL_VARR &operator =(const UNCALL_VARR &aOther) {
         mValue = aOther.mValue;
     }
 
-    T operator ->() {
+    T operator ->() const {
         UNCALL();
         return mValue;
     }
@@ -93,12 +93,12 @@ public:
         mValue = aValue;
     }
 
-    UNCALL_VARRW &operator =(UNCALL_VARRW &aOther) {
+    UNCALL_VARRW &operator =(const UNCALL_VARRW &aOther) {
         UNCALL();
         mValue = aOther.mValue;
     }
 
-    T operator ->() {
+    T operator ->() const {
         UNCALL();
         return mValue;
     }
