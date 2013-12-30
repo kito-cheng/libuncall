@@ -133,9 +133,61 @@ def print_flows_symbols(log):
     pass
 
 
+class cxx_mangler(object):
+    @staticmethod
+    def _demangle_cxx_nested(name, walk_pos):
+        parts = []
+        while walk_pos < len(name) and str.isdigit(name[walk_pos]):
+            value = cxx_mangler._demangle_cxx_part(name, walk_pos)
+            walk_pos, part = value
+            parts.append(part)
+            pass
+        
+        if not parts or name[walk_pos] != 'E':
+            raise SyntaxError, ('%d: invalid foramt!' % walk_pos)
+    
+        return '::'.join(parts)
+
+    @staticmethod
+    def _demangle_cxx_part(name, walk_pos):
+        psz_start = walk_pos
+        while str.isdigit(name[walk_pos]):
+            walk_pos = walk_pos + 1
+            pass
+        if psz_start == walk_pos:
+            raise SyntaxError, ('%d: invalid format!' % psz_start)
+        psz = int(name[psz_start : walk_pos])
+        if psz <= 0:
+            raise SyntaxError, ('%d: invalid format!' % psz_start)
+        part = name[walk_pos : walk_pos + psz]
+        walk_pos = walk_pos + psz
+        return walk_pos, part
+
+    @staticmethod
+    def _demangle_cxx(name):
+        if name[:2] != '_Z':
+            return name
+        if name[2] == 'N':
+            part = cxx_mangler._demangle_cxx_nested(name, 3)
+        else:
+            walk_pos, part = cxx_mangler._demangle_cxx_part(name, 2)
+            pass
+        return part
+
+    @staticmethod
+    def demangle(name):
+        try:
+            return cxx_mangler._demangle_cxx(name)
+        except:
+            # Too complicate?! Template?! Give up!
+            return name
+        pass
+    pass
+
 def get_name(DIE):
     if DIE.attributes.has_key('DW_AT_MIPS_linkage_name'):
-        return DIE.attributes['DW_AT_MIPS_linkage_name'].value
+        name = DIE.attributes['DW_AT_MIPS_linkage_name'].value
+        return cxx_mangler.demangle(name)
     return DIE.attributes['DW_AT_name'].value
 
 def find_spec_name(CU, spec_off):
