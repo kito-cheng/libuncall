@@ -17,7 +17,9 @@ class UNCALL_VARW {
     T mValue;
 public:
     UNCALL_VARW() {}
-    UNCALL_VARW(T &aValue): mValue(aValue) {}
+    UNCALL_VARW(T &aValue): mValue(aValue) {
+        UNCALL();
+    }
 
     UNCALL_VARW &operator =(const T &aValue) {
         UNCALL();
@@ -84,7 +86,9 @@ class UNCALL_VARRW {
     T mValue;
 public:
     UNCALL_VARRW() {}
-    UNCALL_VARRW(T &aValue): mValue(aValue) {}
+    UNCALL_VARRW(T &aValue): mValue(aValue) {
+        UNCALL();
+    }
 
     UNCALL_VARRW &operator =(const T &aValue) {
         UNCALL();
