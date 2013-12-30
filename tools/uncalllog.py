@@ -133,6 +133,12 @@ def print_flows_symbols(log):
     pass
 
 
+#
+# C++ (de)mangling tool according C++ ABI.
+#
+# Only very limited features are implemented for now.  Some one may be
+# instered to improve it being more completed.
+#
 class cxx_mangler(object):
     @staticmethod
     def _demangle_cxx_nested(name, walk_pos):
@@ -183,6 +189,7 @@ class cxx_mangler(object):
             return name
         pass
     pass
+
 
 def get_name(DIE):
     if DIE.attributes.has_key('DW_AT_MIPS_linkage_name'):
