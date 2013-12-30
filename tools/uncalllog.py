@@ -1,6 +1,5 @@
 # -*- Mode: python; tab-width: 4; indent-tab-mode: nil; py-indent-offset: 4 -*-
 from elftools.elf.elffile import ELFFile
-from elftools.elf.enums import ENUM_E_TYPE
 import re
 
 
