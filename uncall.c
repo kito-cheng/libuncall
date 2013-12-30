@@ -289,8 +289,8 @@ uncall(uncall_context_t *ctx) {
     flow_bytes = sizeof(unw_word_t) * flow_size;
     RC4_KSA_feed(rc4, (const unsigned char *)flow, flow_bytes);
 
+    /* 24bits only - considering the size of the bookmark. */
     flow_code =
-        (RC4_PRGA(rc4) << 24) |
         (RC4_PRGA(rc4) << 16) |
         (RC4_PRGA(rc4) << 8) |
         RC4_PRGA(rc4);
