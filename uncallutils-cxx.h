@@ -22,11 +22,13 @@ public:
     UNCALL_VARW &operator =(const T &aValue) {
         UNCALL();
         mValue = aValue;
+        return *this;
     }
 
     UNCALL_VARW &operator =(const UNCALL_VARW &aOther) {
         UNCALL();
         mValue = aOther.mValue;
+        return *this;
     }
 
     T operator ->() const {
@@ -55,10 +57,12 @@ public:
 
     UNCALL_VARR &operator =(const T &aValue) {
         mValue = aValue;
+        return *this;
     }
 
     UNCALL_VARR &operator =(const UNCALL_VARR &aOther) {
         mValue = aOther.mValue;
+        return *this;
     }
 
     T operator ->() const {
@@ -85,11 +89,13 @@ public:
     UNCALL_VARRW &operator =(const T &aValue) {
         UNCALL();
         mValue = aValue;
+        return *this;
     }
 
     UNCALL_VARRW &operator =(const UNCALL_VARRW &aOther) {
         UNCALL();
         mValue = aOther.mValue;
+        return *this;
     }
 
     T operator ->() const {
