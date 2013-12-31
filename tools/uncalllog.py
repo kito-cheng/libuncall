@@ -1,6 +1,7 @@
 # -*- Mode: python; tab-width: 4; indent-tab-mode: nil; py-indent-offset: 4 -*-
 from elftools.elf.elffile import ELFFile
 import re
+import gc
 
 
 reo_mapsline = re.compile('([0-9a-f]+)-([0-9-a-f]+) ..x. ([0-9a-f]+) ([0-9:]+) ([0-9]+) *([^ ]+)')
@@ -96,6 +97,34 @@ class uncall_log(object):
     pass
 
 
+_interested_IDE_attrs = [
+    'DW_AT_MIPS_linkage_name',
+    'DW_AT_name',
+    'DW_AT_low_pc',
+    'DW_AT_high_pc',
+    'DW_AT_specification',
+    'DW_AT_ranges']
+
+def DIE_values(DIE):
+    values = [(name, DIE.attributes[name].value)
+              for name in _interested_IDE_attrs
+              if DIE.attributes.has_key(name)]
+    values.append(('offset', DIE.offset))
+    return dict(values)
+
+def filter_CU_DIEs(CU):
+    try:
+        return CU.DIEs_filtered_cache
+    except:
+        DIEs = [DIE_values(DIE) for DIE in CU.iter_DIEs()
+                if DIE.tag == 'DW_TAG_subprogram']
+        CU.DIEs_filtered_cache = DIEs
+        CU.clear_DIEs()
+        gc.collect()
+        pass
+    return CU.DIEs_filtered_cache
+
+
 def print_flows_symbols(log):
     elfs = {}
     result_cache = {}
@@ -117,7 +146,7 @@ def print_flows_symbols(log):
                 elf = elfs[so]
             except:
                 fo = file(so, 'rb')
-                elf = ELFFile(fo)
+                elf = ELFFile(fo, bytesio=False)
                 if not elf.has_dwarf_info():
                     print '%s:?:0x%x(rel:0x%x)' % (so, addr, rel)
                     continue
@@ -212,14 +241,14 @@ class cxx_mangler(object):
 
 
 def get_name(DIE):
-    if DIE.attributes.has_key('DW_AT_MIPS_linkage_name'):
-        name = DIE.attributes['DW_AT_MIPS_linkage_name'].value
+    if DIE.has_key('DW_AT_MIPS_linkage_name'):
+        name = DIE['DW_AT_MIPS_linkage_name']
         return cxx_mangler.demangle(name)
-    return DIE.attributes['DW_AT_name'].value
+    return DIE['DW_AT_name']
 
 def find_spec_name(CU, spec_off):
-    for DIE in CU.iter_DIEs():
-        if DIE.offset == spec_off:
+    for DIE in filter_CU_DIEs(CU):
+        if DIE['offset'] == spec_off:
             try:
                 return get_name(DIE)
             except KeyError:
@@ -229,17 +258,15 @@ def find_spec_name(CU, spec_off):
     pass
 
 def decode_func_name_CU(CU, addr):
-    for DIE in CU.iter_DIEs():
+    for DIE in filter_CU_DIEs(CU):
         try:
-            if DIE.tag != 'DW_TAG_subprogram':
-                continue
-            lowpc = DIE.attributes['DW_AT_low_pc'].value
-            hipc = DIE.attributes['DW_AT_high_pc'].value
+            lowpc = DIE['DW_AT_low_pc']
+            hipc = DIE['DW_AT_high_pc']
             if lowpc <= addr <= hipc:
                 try:
                     return get_name(DIE)
                 except KeyError:
-                    spec_off = DIE.attributes['DW_AT_specification'].value
+                    spec_off = DIE['DW_AT_specification']
                     spec_off = spec_off + CU.cu_offset
                     return find_spec_name(CU, spec_off)
                 pass
