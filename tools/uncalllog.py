@@ -244,11 +244,13 @@ def print_flows_dot(log):
                      for flow in log.flows
                      for addr in flow])
     addr_name_pairs = [(addr,
-                        resolver.decode_func_name(addr) or ('N_0x%x' % addr))
-                        for addr in sorted(all_addrs)]
+                        resolver.decode_func_name(addr)
+                        or ('addr@0x%x' % addr))
+                       for addr in sorted(all_addrs)]
     addr_name_map = dict(addr_name_pairs)
     
     graph = {None: []}
+    outgoing_count = {}
     for i in range(len(log.flows)):
         flow = log.flows[i]
         to = None
@@ -256,20 +258,32 @@ def print_flows_dot(log):
             name = addr_name_map[addr]
             if name not in graph:
                 graph[name] = []
+                outgoing_count[name] = 0
                 pass
             if name not in graph[to]:
                 graph[to].append(name)
+                outgoing_count[name] = outgoing_count[name] + 1
                 pass
             to = name
             pass
         pass
+    for src_name in graph[None]:
+        outgoing_count[src_name] = outgoing_count[src_name] -1
+        pass
     del graph[None]
 
     print 'digraph uncallutils {'
+    
+    terminals = ['\t"%s" [color=red];' % name
+                 for name, count in outgoing_count.items()
+                 if count == 0]
+    print '\n'.join(terminals)
+    
     edges = ['\t"%s" -> "%s";' % (src, to)
              for to, srcs in graph.items()
              for src in srcs]
     print '\n'.join(edges)
+    
     print '}'
     pass
 
