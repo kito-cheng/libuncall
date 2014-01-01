@@ -162,14 +162,19 @@ def print_flows_symbols(log):
                 pass
             
             dwarf = elf.cache_dwarf
-            func_name = decode_func_name(dwarf, laddr)
+            CU = _CU_finder.addr_to_CU(dwarf, laddr)
+            if CU is None:
+                print '%s:?:0x%x(rel:0x%x)' % (so, addr, rel)
+                continue
+            
+            func_name = decode_func_name(CU, laddr)
             if func_name:
                 func_name = func_name + '()'
             else:
                 func_name = '0x%x(rel:0x%x)' % (addr, rel)
                 pass
             try:
-                filename, line = decode_file_line(dwarf, laddr)
+                filename, line = decode_file_line(CU, laddr)
             except:
                 filename, line = so, '?'
                 pass
@@ -277,58 +282,95 @@ def decode_func_name_CU(CU, addr):
     pass
 
 
-def check_addr_in_CU(CU, addr):
-    dwarf = CU.dwarfinfo
-    try:
-        range_lists = dwarf.range_lists_cache
-    except AttributeError:
-        range_lists = dwarf.range_lists()
-        dwarf.range_lists_cache = range_lists
-        pass
-    DIE = CU.get_top_DIE()
-    try:
-        ranges_offset = DIE.attributes['DW_AT_ranges'].value
-        range_list = range_lists.get_range_list_at_offset(ranges_offset)
-        for entry in range_list:
-            if entry.begin_offset <= addr < entry.end_offset:
-                return True
+class _CU_finder(object):
+    @staticmethod
+    def _CU_range_list(CU):
+        dwarf = CU.dwarfinfo
+        try:
+            range_lists = dwarf.range_lists_cache
+        except AttributeError:
+            range_lists = dwarf.range_lists()
+            dwarf.range_lists_cache = range_lists
             pass
-        pass
-    except KeyError:
-        pass
-    return False
+        
+        top_DIE = CU.get_top_DIE()
+        try:
+            range_offset = top_DIE.attributes['DW_AT_ranges'].value
+        except KeyError:
+            return []
+        range_list = range_lists.get_range_list_at_offset(range_offset)
+        range_pairs = [(range.begin_offset, range.end_offset)
+                       for range in  range_list]
+        return range_pairs
+    
+    
+    @staticmethod
+    def _sorted_CU_map(dwarf):
+        if hasattr(dwarf, 'sorted_CU_map'):
+            return dwarf.sorted_CU_map
+        
+        CU_map = [(start, stop, CU)
+                  for CU in dwarf.iter_CUs()
+                  for start, stop in _CU_finder._CU_range_list(CU)]
+        CU_map.sort(key=lambda x: x[0])
+        dwarf.sorted_CU_map = CU_map
+        return CU_map
+    
+    
+    @staticmethod
+    def _range_search(sorted_ranges, target):
+        i = 0
+        j = len(sorted_ranges)
+        while i <= j:
+            k = (i + j) >> 1
+            range = sorted_ranges[k]
+            low = range[0]
+            if target < low:
+                j = k - 1
+            else:
+                i = k + 1
+                pass
+            pass
+        # The target would be in the range of j if there is.
+        assert sorted_ranges[j][0] <= target
+        assert sorted_ranges[i][0] > target
+        return j
 
-
-def decode_func_name(dwarf, addr):
-    for CU in dwarf.iter_CUs():
-        if check_addr_in_CU(CU, addr):
-            return decode_func_name_CU(CU, addr)
-        pass
+    @staticmethod
+    def addr_to_CU(dwarf, addr):
+        sorted_map = _CU_finder._sorted_CU_map(dwarf)
+        closest_idx = _CU_finder._range_search(sorted_map, addr)
+        begin, end, candidate_CU = sorted_map[closest_idx]
+        CU = (begin <= addr < end) and candidate_CU or None
+        return CU
     pass
 
 
-def decode_file_line(dwarf, addr):
-    for CU in dwarf.iter_CUs():
-        if not check_addr_in_CU(CU, addr):
+def decode_func_name(CU, addr):
+    if CU is not None:
+        return decode_func_name_CU(CU, addr)
+    return
+
+
+def decode_file_line(CU, addr):
+    dwarf = CU.dwarfinfo
+    
+    try:
+        lineprog = CU.lineprog_cache
+    except:
+        lineprog = dwarf.line_program_for_CU(CU)
+        CU.lineprog_cache = lineprog
+        pass
+    
+    prevstate = None
+    for entry in lineprog.get_entries():
+        if entry.state is None or entry.state.end_sequence:
             continue
-        
-        try:
-            lineprog = CU.lineprog_cache
-        except:
-            lineprog = dwarf.line_program_for_CU(CU)
-            CU.lineprog_cache = lineprog
-            pass
-        
-        prevstate = None
-        for entry in lineprog.get_entries():
-            if entry.state is None or entry.state.end_sequence:
-                continue
-            if prevstate and prevstate.address <= addr < entry.state.address:
-                filename = lineprog['file_entry'][prevstate.file - 1].name
-                line = prevstate.line
-                return filename, line
-            prevstate = entry.state
-            pass
+        if prevstate and prevstate.address <= addr < entry.state.address:
+            filename = lineprog['file_entry'][prevstate.file - 1].name
+            line = prevstate.line
+            return filename, line
+        prevstate = entry.state
         pass
     pass
 
