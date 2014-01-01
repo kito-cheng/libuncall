@@ -1,6 +1,6 @@
 # -*- Mode: python; tab-width: 4; indent-tab-mode: nil; py-indent-offset: 4 -*-
 from elftools.elf.elffile import ELFFile
-import re
+import re, bisect
 import gc
 
 
@@ -303,43 +303,24 @@ class _CU_finder(object):
                        for range in  range_list]
         return range_pairs
     
-    
     @staticmethod
     def _sorted_CU_map(dwarf):
         if hasattr(dwarf, 'sorted_CU_map'):
-            return dwarf.sorted_CU_map
+            return dwarf.sorted_CU_map, dwarf.sorted_CU_map_low
         
         CU_map = [(start, stop, CU)
                   for CU in dwarf.iter_CUs()
                   for start, stop in _CU_finder._CU_range_list(CU)]
         CU_map.sort(key=lambda x: x[0])
+        CU_map_low = [low for low, high, CU in CU_map]
         dwarf.sorted_CU_map = CU_map
-        return CU_map
-    
-    
-    @staticmethod
-    def _range_search(sorted_ranges, target):
-        i = 0
-        j = len(sorted_ranges)
-        while i <= j:
-            k = (i + j) >> 1
-            range = sorted_ranges[k]
-            low = range[0]
-            if target < low:
-                j = k - 1
-            else:
-                i = k + 1
-                pass
-            pass
-        # The target would be in the range of j if there is.
-        assert sorted_ranges[j][0] <= target
-        assert sorted_ranges[i][0] > target
-        return j
+        dwarf.sorted_CU_map_low = CU_map_low
+        return CU_map, CU_map_low
 
     @staticmethod
     def addr_to_CU(dwarf, addr):
-        sorted_map = _CU_finder._sorted_CU_map(dwarf)
-        closest_idx = _CU_finder._range_search(sorted_map, addr)
+        sorted_map, sorted_map_low = _CU_finder._sorted_CU_map(dwarf)
+        closest_idx = bisect.bisect_right(sorted_map_low, addr) - 1
         begin, end, candidate_CU = sorted_map[closest_idx]
         CU = (begin <= addr < end) and candidate_CU or None
         return CU
