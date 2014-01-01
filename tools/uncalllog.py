@@ -125,6 +125,57 @@ def filter_CU_DIEs(CU):
     return CU.DIEs_filtered_cache
 
 
+class dwarf_resolver(object):
+    def __init__(self, log):
+        super(dwarf_resolver, self).__init__()
+        self._log = log
+        self._elfs_cache = {}
+        self._last_addr = None
+        self._last_CU = None
+        pass
+
+    def _find_elf(self, addr):
+        value = self._log.maps.lookup_address_rel(addr)
+        if value is None:
+            return
+        
+        rel, so = value
+        if so not in self._elfs_cache:
+            fo = file(so, 'r')
+            elf = ELFFile(fo, bytesio=False)
+            self._elfs_cache[so] = elf
+            pass
+
+        elf = self._elfs_cache[so]
+        return elf, rel
+    
+    def _addr_to_CU(self, addr):
+        elf_rel = self._find_elf(addr)
+        if elf_rel is None:
+            return
+        
+        elf, rel = elf_rel
+        if elf['e_type'] == 'ET_EXEC':
+            laddr = addr - 1      # for x86, IP is at next opcode.
+        else:
+            laddr = rel - 1       # for x86, IP is at next opcode.
+            pass
+        if not hasattr(elf, '_dwarf_cache'):
+            elf._dwarf_cache = elf.get_dwarf_info()
+        dwarf = elf._dwarf_cache
+        CU = _CU_finder.addr_to_CU(dwarf, laddr)
+        return CU, laddr
+
+    def decode_func_name(self, addr):
+        CU_rel = self._addr_to_CU(addr)
+        if CU_rel is None:
+            return
+        CU, rel = CU_rel
+        func_name = decode_func_name(CU, rel)
+        return func_name
+    pass
+
+
 def print_flows_symbols(log):
     elfs = {}
     result_cache = {}
@@ -184,6 +235,42 @@ def print_flows_symbols(log):
             pass
         print
         pass
+    pass
+
+
+def print_flows_dot(log):
+    resolver = dwarf_resolver(log)
+    all_addrs = set([addr
+                     for flow in log.flows
+                     for addr in flow])
+    addr_name_pairs = [(addr,
+                        resolver.decode_func_name(addr) or ('N_0x%x' % addr))
+                        for addr in sorted(all_addrs)]
+    addr_name_map = dict(addr_name_pairs)
+    
+    graph = {None: []}
+    for i in range(len(log.flows)):
+        flow = log.flows[i]
+        to = None
+        for addr in flow:
+            name = addr_name_map[addr]
+            if name not in graph:
+                graph[name] = []
+                pass
+            if name not in graph[to]:
+                graph[to].append(name)
+                pass
+            to = name
+            pass
+        pass
+    del graph[None]
+
+    print 'digraph uncallutils {'
+    edges = ['\t"%s" -> "%s";' % (src, to)
+             for to, srcs in graph.items()
+             for src in srcs]
+    print '\n'.join(edges)
+    print '}'
     pass
 
 
@@ -386,10 +473,21 @@ def decode_file_line(CU, addr):
 
 
 if __name__ == '__main__':
-    import sys, pprint
-    filename = sys.argv[1]
+    import sys, pprint, optparse
+    
+    parser = optparse.OptionParser()
+    parser.add_option('-d', '--dot', dest='dot',
+                      action='store_true', default=False,
+                      help='Create dot graph!')
+    options, args = parser.parse_args()
+    
+    filename = args[0]
     log = uncall_log()
     log.load(filename)
 
-    print_flows_symbols(log)
+    if options.dot:
+        print_flows_dot(log)
+    else:
+        print_flows_symbols(log)
+        pass
     pass
