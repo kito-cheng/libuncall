@@ -404,9 +404,16 @@ class _CU_finder(object):
             return (dwarf.sorted_CU_map,
                     dwarf.sorted_CU_map_low,
                     dwarf.sorted_CU_map_high_before)
-        
+        def silence_fault_for_dwarf_iter_CUs():
+            try:
+                for CU in dwarf.iter_CUs():
+                    yield CU
+                    pass
+            except AttributeError:           # No .debug_info section?
+                pass
+            pass
         CU_map = [(low, high, CU)
-                  for CU in dwarf.iter_CUs()
+                  for CU in silence_fault_for_dwarf_iter_CUs()
                   for low, high in _CU_finder._CU_range_list(CU)]
         CU_map.sort(key=lambda x: x[0])   # This is a stable sorting.
         CU_map_low = [low for low, high, CU in CU_map]
@@ -428,6 +435,9 @@ class _CU_finder(object):
     def _first_matched(dwarf, addr):
         sorted_map, sorted_map_low, sorted_map_high_before = \
           _CU_finder._sorted_CU_map(dwarf)
+        if len(sorted_map) == 0:
+            return 0
+        
         closest_idx = bisect.bisect_right(sorted_map_low, addr)
         #
         # Since all low addresses before this one are always lower
@@ -450,7 +460,10 @@ class _CU_finder(object):
     def addr_to_CU(dwarf, addr):
         sorted_map, sorted_map_low, sorted_map_high_before = \
           _CU_finder._sorted_CU_map(dwarf)
+        
         closest_idx = _CU_finder._first_matched(dwarf, addr)
+        if closest_idx >= len(sorted_map):
+            return None
         low, high, candidate_CU = sorted_map[closest_idx]
         CU = (low <= addr < high) and candidate_CU or None
         return CU
