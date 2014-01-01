@@ -285,13 +285,7 @@ def decode_func_name_CU(CU, addr):
 class _CU_finder(object):
     @staticmethod
     def _CU_range_list(CU):
-        dwarf = CU.dwarfinfo
-        try:
-            range_lists = dwarf.range_lists_cache
-        except AttributeError:
-            range_lists = dwarf.range_lists()
-            dwarf.range_lists_cache = range_lists
-            pass
+        range_lists = CU.dwarfinfo.range_lists()
         
         top_DIE = CU.get_top_DIE()
         try:
@@ -306,23 +300,57 @@ class _CU_finder(object):
     @staticmethod
     def _sorted_CU_map(dwarf):
         if hasattr(dwarf, 'sorted_CU_map'):
-            return dwarf.sorted_CU_map, dwarf.sorted_CU_map_low
+            return (dwarf.sorted_CU_map,
+                    dwarf.sorted_CU_map_low,
+                    dwarf.sorted_CU_map_high_before)
         
-        CU_map = [(start, stop, CU)
+        CU_map = [(low, high, CU)
                   for CU in dwarf.iter_CUs()
-                  for start, stop in _CU_finder._CU_range_list(CU)]
-        CU_map.sort(key=lambda x: x[0])
+                  for low, high in _CU_finder._CU_range_list(CU)]
+        CU_map.sort(key=lambda x: x[0])   # This is a stable sorting.
         CU_map_low = [low for low, high, CU in CU_map]
+        
+        CU_map_high_before = [high for low, high, CU in CU_map]
+        before = 0
+        for i in range(len(CU_map_high_before)):
+            new_high_before = max(before, CU_map_high_before[i])
+            CU_map_high_before[i] = before
+            before = new_high_before
+            pass
+        
         dwarf.sorted_CU_map = CU_map
         dwarf.sorted_CU_map_low = CU_map_low
-        return CU_map, CU_map_low
+        dwarf.sorted_CU_map_high_before = CU_map_high_before
+        return CU_map, CU_map_low, CU_map_high_before
+
+    @staticmethod
+    def _first_matched(dwarf, addr):
+        sorted_map, sorted_map_low, sorted_map_high_before = \
+          _CU_finder._sorted_CU_map(dwarf)
+        closest_idx = bisect.bisect_right(sorted_map_low, addr)
+        #
+        # Since all low addresses before this one is always lower than
+        # this one, and the most the high address before thhis one is
+        # bigger than the value of addr, then there must be some one
+        # earlier before covering the value of addr.
+        #
+        while addr < sorted_map_high_before[closest_idx]:
+            closest_idx = closest_idx - 1
+            pass
+        #
+        # This is the index of the first range in the list that cover
+        # the value of addr if there is.  It promises to match the
+        # first CU since list.sort() of Python is stable.
+        #
+        return closest_idx
 
     @staticmethod
     def addr_to_CU(dwarf, addr):
-        sorted_map, sorted_map_low = _CU_finder._sorted_CU_map(dwarf)
-        closest_idx = bisect.bisect_right(sorted_map_low, addr) - 1
-        begin, end, candidate_CU = sorted_map[closest_idx]
-        CU = (begin <= addr < end) and candidate_CU or None
+        sorted_map, sorted_map_low, sorted_map_high_before = \
+          _CU_finder._sorted_CU_map(dwarf)
+        closest_idx = _CU_finder._first_matched(dwarf, addr)
+        low, high, candidate_CU = sorted_map[closest_idx]
+        CU = (low <= addr < high) and candidate_CU or None
         return CU
     pass
 
