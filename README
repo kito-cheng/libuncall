@@ -73,4 +73,7 @@ tests/uncallutils-test.
 == DEPENDENCIES ==
 
  - https://github.com/eliben/pyelftools
+   - https://github.com/ThinkerYzu/pyelftools
+     - You may use my repository since I have some changes still not
+       be pulled by the up stream yet.
  - libunwind
