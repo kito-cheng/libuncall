@@ -65,7 +65,7 @@ tests/uncallutils-test.
   
   test$ 
 
-uncalllog.py also generate dot graph of graphviz.  For example:
+uncalllog.py also generates dot graph of graphviz.  For example:
 
   tests$ env PYTHONPATH=~/progm/pyelftools/ python \
   ../tools/uncalllog.py -d uncallutils.log 
