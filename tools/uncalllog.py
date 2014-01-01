@@ -329,18 +329,19 @@ class _CU_finder(object):
           _CU_finder._sorted_CU_map(dwarf)
         closest_idx = bisect.bisect_right(sorted_map_low, addr)
         #
-        # Since all low addresses before this one is always lower than
-        # this one, and the most the high address before thhis one is
-        # bigger than the value of addr, then there must be some one
-        # earlier before covering the value of addr.
+        # Since all low addresses before this one are always lower
+        # than or equal to this one, and the biggest high address
+        # before thhis one is bigger than the value of addr, then
+        # there must be some one earlier covering the value of addr.
         #
         while addr < sorted_map_high_before[closest_idx]:
             closest_idx = closest_idx - 1
             pass
         #
-        # This is the index of the first range in the list that cover
+        # This is the index of the first range in the list covering
         # the value of addr if there is.  It promises to match the
-        # first CU since list.sort() of Python is stable.
+        # first CU covering the value of addr since list.sort() of
+        # Python is stable.
         #
         return closest_idx
 
