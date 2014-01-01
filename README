@@ -65,6 +65,24 @@ tests/uncallutils-test.
   
   test$ 
 
+uncalllog.py also generate dot graph of graphviz.  For example:
+
+  tests$ env PYTHONPATH=~/progm/pyelftools/ python \
+  ../tools/uncalllog.py -d uncallutils.log 
+  digraph uncallutils {
+          "_ZN11UNCALL_VARWIjEaSERKj" [color=red];
+          "_ZN11UNCALL_VARWIiEaSERKi" [color=red];
+          "main" -> "path2";
+          "path1" -> "target::run";
+          "path2" -> "target::run";
+          "target::run" -> "_ZN11UNCALL_VARWIjEaSERKj";
+          "main" -> "path1";
+          "addr@0x400809" -> "addr@0x7f7b11fad995";
+          "target::run" -> "_ZN11UNCALL_VARWIiEaSERKi";
+          "addr@0x7f7b11fad995" -> "main";
+  }
+  test$
+
 
 == DOWNLOAD ==
 
