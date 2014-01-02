@@ -10,6 +10,7 @@ class maps(object):
     def __init__(self):
         super(maps, self).__init__()
         self._maps = []
+        self._last_lookup_cache = (None, None, None, None)
         pass
     
     def load(self, lines):
@@ -34,8 +35,12 @@ class maps(object):
         pass
 
     def lookup_address(self, address):
+        if address == self._last_lookup_cache[0]:
+            return self._last_lookup_cache[1:]
+        
         for start, stop, filename in self._maps:
             if address >= start and address < stop:
+                self._last_lookup_cache = (address, start, stop, filename)
                 return (start, stop, filename)
             pass
         pass
@@ -132,14 +137,15 @@ class dwarf_resolver(object):
         self._elfs_cache = {}
         self._last_addr = None
         self._last_CU = None
+        self._last_laddr = None
         pass
 
     def _find_elf(self, addr):
-        value = self._log.maps.lookup_address_rel(addr)
-        if value is None:
+        rel_so = self._log.maps.lookup_address_rel(addr)
+        if rel_so is None:
             return
         
-        rel, so = value
+        rel, so = rel_so
         if so not in self._elfs_cache:
             fo = file(so, 'r')
             elf = ELFFile(fo, bytesio=False)
@@ -150,6 +156,9 @@ class dwarf_resolver(object):
         return elf, rel
     
     def _addr_to_CU(self, addr):
+        if self._last_addr == addr:
+            return self._last_CU, self._last_laddr
+        
         elf_rel = self._find_elf(addr)
         if elf_rel is None:
             return
@@ -164,6 +173,11 @@ class dwarf_resolver(object):
             elf._dwarf_cache = elf.get_dwarf_info()
         dwarf = elf._dwarf_cache
         CU = _CU_finder.addr_to_CU(dwarf, laddr)
+        if CU is None:
+            return
+        
+        self._last_CU, self._last_laddr, self._last_addr = CU, laddr, addr
+        
         return CU, laddr
 
     def decode_func_name(self, addr):
@@ -173,12 +187,20 @@ class dwarf_resolver(object):
         CU, rel = CU_rel
         func_name = decode_func_name(CU, rel)
         return func_name
+
+    def decode_file_line(self, addr):
+        CU_rel_pair = self._addr_to_CU(addr)
+        found_CU = CU_rel_pair is not None
+        rv = (found_CU
+              and decode_file_line(*CU_rel_pair)   # (file, line) pair
+              or None)
+        return rv
     pass
 
 
 def print_flows_symbols(log):
-    elfs = {}
     result_cache = {}
+    resolver = dwarf_resolver(log)
     
     for i in range(len(log.flows)):
         print 'FLOW:'
@@ -187,52 +209,24 @@ def print_flows_symbols(log):
             if addr in result_cache:
                 print '%s:%s:%s' % result_cache[addr]
                 continue
-            
-            value = log.maps.lookup_address_rel(addr)
-            if value is None:
-                print '?:?:0x%x' % (addr)
-                continue
-            rel, so = value
-            try:
-                elf = elfs[so]
-            except:
-                fo = file(so, 'rb')
-                elf = ELFFile(fo, bytesio=False)
-                if not elf.has_dwarf_info():
-                    print '%s:?:0x%x(rel:0x%x)' % (so, addr, rel)
-                    continue
-                    # raise '%s: no dwarf information!' % so
-                elfs[so] = elf
-                elf.cache_dwarf = elf.get_dwarf_info()
-                pass
 
-            if elf['e_type'] == 'ET_EXEC':
-                laddr = addr - 1      # for x86, IP is at next opcode.
-            else:
-                laddr = rel - 1       # for x86, IP is at next opcode.
-                pass
-            
-            dwarf = elf.cache_dwarf
-            CU = _CU_finder.addr_to_CU(dwarf, laddr)
-            if CU is None:
-                print '%s:?:0x%x(rel:0x%x)' % (so, addr, rel)
+            rel_so_pair = log.maps.lookup_address_rel(addr)
+            if rel_so_pair is None:
+                print '?:?:0x%x' % addr
                 continue
+
+            rel, so = rel_so_pair
             
-            func_name = decode_func_name(CU, laddr)
-            if func_name:
-                func_name = func_name + '()'
-            else:
-                func_name = '0x%x(rel:0x%x)' % (addr, rel)
-                pass
-            try:
-                filename, line = decode_file_line(CU, laddr)
-            except:
-                filename, line = so, '?'
-                pass
+            symbol = resolver.decode_func_name(addr)
+            func_name = (symbol and symbol + '()'
+                         or ('0x%x(rel:0x%x)' % (addr, rel)))
+            filename, line = (resolver.decode_file_line(addr)
+                              or (so, '?'))
+            
             print '%s:%s:%s' % (filename, line, func_name)
-            
             result_cache[addr] = (filename, line, func_name)
             pass
+        
         print
         pass
     pass
