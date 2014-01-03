@@ -93,11 +93,13 @@ class uncall_log(object):
         fo = file(filename, 'r')
         txt = fo.read()
         lines = txt.split('\n')
-        maps_idx = lines.index('MAPS:')
-        flows_idx = lines.index('FLOWS:')
+        maps_lines = [line[4:].strip()
+                      for line in lines if line.startswith('MAP:')]
+        flows_lines = [line[5:].strip()
+                       for line in lines if line.startswith('FLOW:')]
 
-        self.maps.load(lines[maps_idx + 1: flows_idx])
-        self.flows.load(lines[flows_idx + 1:])
+        self.maps.load(maps_lines)
+        self.flows.load(flows_lines)
         pass
     pass
 
@@ -198,7 +200,7 @@ class dwarf_resolver(object):
     pass
 
 
-def print_flows_symbols(log):
+def print_flows_symbols(log, concurrent=1):
     result_cache = {}
     resolver = dwarf_resolver(log)
     
@@ -232,7 +234,7 @@ def print_flows_symbols(log):
     pass
 
 
-def print_flows_dot(log):
+def print_flows_dot(log, concurrent=1):
     resolver = dwarf_resolver(log)
     all_addrs = set([addr
                      for flow in log.flows
@@ -500,6 +502,9 @@ if __name__ == '__main__':
     parser.add_option('-d', '--dot', dest='dot',
                       action='store_true', default=False,
                       help='Create dot graph!')
+    parser.add_option('-j', dest='concurrent',
+                      default=1, type='int',
+                      help='Concurrent level!')
     options, args = parser.parse_args()
     
     filename = args[0]
@@ -507,8 +512,8 @@ if __name__ == '__main__':
     log.load(filename)
 
     if options.dot:
-        print_flows_dot(log)
+        print_flows_dot(log, options.concurrent)
     else:
-        print_flows_symbols(log)
+        print_flows_symbols(log, options.concurrent)
         pass
     pass

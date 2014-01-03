@@ -152,14 +152,19 @@ bookmark_flow_code(uncall_context_t *ctx, uint32_t code) {
  */
 static void
 log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
+    static const char flow_prefix[] = "FLOW: ";
     int buf_size;
     char *buf, *buf_free;
     int i, cp, data_sz;
 
     buf_size = size * 19 + 1;   // The max size of 0xXXXX is 18 bytes.
+    buf_size += sizeof(flow_prefix) - 1;
     buf = (char*)malloc(buf_size);
 
     buf_free = buf;
+    memcpy(buf_free, flow_prefix, sizeof(flow_prefix) - 1);
+    buf_free += sizeof(flow_prefix) - 1;
+
     for (i = 0; i < size; i++) {
         sprintf(buf_free, "0x%lx ", flow[i]);
         cp = strlen(buf_free);
@@ -180,26 +185,41 @@ log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
  */
 static void
 write_out_maps(uncall_context_t *ctx) {
-    static const char maps[] = "MAPS:\n";
-    int mapsfd, rdsz, wrsz, remain;
+    static const char map_prefix[] = "MAP: ";
+    int mapsfd, rdsz, wrsz, remain, wrsz_expect;
     char buf[IO_BUF_SIZE];
-    char *ptr;
+    char *ptr, *eol;
+    int start_of_line = 1;
 
     mapsfd = open("/proc/self/maps", O_RDONLY);
     ASSERTION(mapsfd >= 0, "incompatible paltform!");
 
-    wrsz = write(ctx->logfd, maps, strlen(maps));
-    ASSERTION(wrsz == strlen(maps), "IO error!");
-
-    while ((rdsz = read(mapsfd, buf, IO_BUF_SIZE)) > 0) {
+    while ((rdsz = read(mapsfd, buf, IO_BUF_SIZE - 1)) > 0) {
+        buf[rdsz] = 0;
         remain = rdsz;
         ptr = buf;
         while (remain > 0) {
-            wrsz = write(ctx->logfd, ptr, remain);
+            if (start_of_line) {
+                wrsz = write(ctx->logfd, map_prefix, sizeof(map_prefix) - 1);
+                ASSERTION(wrsz == strlen(map_prefix), "IO error!");
+            }
+
+            eol = strchr(ptr, '\n');
+            if (eol != NULL) {
+                wrsz_expect = eol - ptr + 1;
+            } else {
+                wrsz_expect = remain;
+            }
+
+            wrsz = write(ctx->logfd, ptr, wrsz_expect);
             ASSERTION(wrsz > 0, "IO error!");
 
             remain -= wrsz;
             ptr += wrsz;
+            start_of_line = 1;
+            if (eol == NULL || wrsz != wrsz_expect) {
+                start_of_line = 0;
+            }
         }
     }
     ASSERTION(rdsz >= 0, "IO error!");
@@ -216,8 +236,6 @@ write_out_maps(uncall_context_t *ctx) {
 void
 uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
     static const unsigned char key[] = "libuncall";
-    static const char flows[] = "FLOWS:\n";
-    int cp;
 
     bzero(ctx, sizeof(uncall_context_t));
 
@@ -232,8 +250,6 @@ uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
     ctx->logfd = logfd;
 
     write_out_maps(ctx);
-    cp = write(ctx->logfd, flows, strlen(flows));
-    ASSERTION(cp == strlen(flows), "IO error!");
 }
 
 /**
