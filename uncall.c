@@ -175,7 +175,13 @@ log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
     buf_free += sizeof(flow_prefix) - 1;
 
     for (i = 0; i < size; i++) {
-        if (flow[i] == 0) break;
+        /*
+         * For some platforms, the last frame is not real existing.
+         * It would return 0 for IP/PC.
+         */
+        if (flow[i] == 0) {
+            break;
+        }
         sprintf(buf_free, "0x%lx ", flow[i]);
         cp = strlen(buf_free);
         buf_free += cp;
