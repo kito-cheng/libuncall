@@ -323,9 +323,9 @@ write_out_maps(uncall_context_t *ctx) {
             addr_buf = (char *)malloc(addr_buf_sz);
         }
 #if ELF_WORD == 32
-        sprintf(addr_buf, "MAP: %08x %s\n", addr, filename);
+        sprintf(addr_buf, "MAP: %08lx %s\n", addr, filename);
 #elif ELF_WORD == 64
-        sprintf(addr_buf, "MAP: %016x %s\n", addr, filename);
+        sprintf(addr_buf, "MAP: %016llx %s\n", addr, filename);
 #else
 #error "Unknown ELF_WORD size!"
 #endif
