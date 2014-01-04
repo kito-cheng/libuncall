@@ -13,12 +13,23 @@ struct RC4_state {
 
 typedef struct RC4_state RC4_state_t;
 
+struct hash {
+    int size;
+    uint32_t *codes;
+};
+typedef struct hash hash_t;
+
+
+struct r_debug;
+
 struct uncall_context {
+    struct r_debug *r_debug;
+
     int max_depth;
     unw_word_t *flow_buf;
 
-    int dup_book_size;
-    uint32_t *dup_book;
+    hash_t flows_dup;
+    hash_t maps_dup;
 
     RC4_state_t rc4_init;    /* initial state of rc4 */
     RC4_state_t rc4;         /* copied from rc4_init for every flow */

@@ -23,9 +23,11 @@ typedef ELFT(Addr) addr_type;
 #define ASSERTION(x, reason) if (!(x)) { abort(); }
 #endif
 
-#define UNC_DUP_BOOK_SIZE_START 256
-#define UNC_DUP_BOOK_SIZE_MAX (256*256)
-#define UNC_DUP_BOOK_BUCKET_SIZE 8
+#define FLOWS_DUP_START_SIZE 256
+#define MAPS_DUP_START_SIZE 64
+
+#define HASH_SIZE_MAX (256*256)
+#define HASH_BUCKET_SIZE 8
 
 #define IO_BUF_SIZE 1024
 
@@ -98,63 +100,61 @@ RC4_PRGA(RC4_state_t *rc4) {
 
 static int bookmark_flow_code(uncall_context_t *ctx, uint32_t code);
 
+static int hash_put(hash_t *hash, uint32_t code);
+
 static void
-bookmark_grow(uncall_context_t *ctx) {
-    uint32_t *old_book = ctx->dup_book;
-    int old_book_size = ctx->dup_book_size;
+hash_grow(hash_t *hash) {
+    int old_size = hash->size;
+    uint32_t *old_codes = hash->codes;
     uint32_t *bucket;
     int i;
 
-    ASSERTION(old_book_size < UNC_DUP_BOOK_SIZE_MAX,
-              "too much collision!");
+    ASSERTION(old_size < HASH_SIZE_MAX, "The hash has too much collision!");
 
-    ctx->dup_book_size = old_book_size << 2;
-    ctx->dup_book = (uint32_t *)calloc(ctx->dup_book_size, sizeof(uint32_t));
+    hash->size = old_size << 2;
+    hash->codes = (uint32_t *)calloc(hash->size, sizeof(uint32_t));
 
-    bucket = old_book;
-    for (i = 0; i < old_book_size; i++, bucket++) {
-        if (*bucket != 0)
-            bookmark_flow_code(ctx, *bucket);
+    bucket = old_codes;
+    for (i = 0; i < old_size; i++, bucket++) {
+        if (*bucket != 0) {
+            hash_put(hash, *bucket);
+        }
     }
 
-    free(old_book);
+    free(old_codes);
 }
 
-/**
- * Check and remember if a flow is already previously existing.
- *
- * The flow code of a flow is the digest of the call flow.  It is used
- * to identify and detect if a call flow is duplicated.  The RC4
- * algorithm is used to generate the flow codes.
- *
- * \param code is the flow code of the flow.
- * \return 0 for a new flow, 1 for an existing flow.
- */
 static int
-bookmark_flow_code(uncall_context_t *ctx, uint32_t code) {
-    uint32_t *book = ctx->dup_book;
-    uint32_t *bucket = ctx->dup_book;
-    int book_size = ctx->dup_book_size;
-    uint32_t bucket_start = code & (book_size / UNC_DUP_BOOK_BUCKET_SIZE - 1);
+hash_put(hash_t *hash, uint32_t code) {
+    int bucket_i = code & (hash->size / HASH_BUCKET_SIZE - 1);
+    uint32_t *bucket = hash->codes + (bucket_i * HASH_BUCKET_SIZE);
     int i;
 
-    bucket = book + bucket_start;
-    for (i = 0; i < UNC_DUP_BOOK_BUCKET_SIZE; i++, bucket++) {
-        if (*bucket != 0) {
-            if (*bucket == code)
-                return 1;
-            continue;
+    for (i = 0; i < HASH_BUCKET_SIZE; i++, bucket++) {
+        if (*bucket == 0) {
+            *bucket = code;
+            return 0;
+        } else if (*bucket == code) {
+            return 1;
         }
-        *bucket = code;
-        return 0;
     }
-    /* the bucket is full */
-
-    bookmark_grow(ctx);
-    bookmark_flow_code(ctx, code);
-
+    /* The bucket is full. */
+    hash_grow(hash);
+    hash_put(hash, code);
     return 0;
 }
+
+static void
+hash_init(hash_t *hash, int start_size) {
+    hash->size = start_size;
+    hash->codes = (uint32_t *)calloc(hash->size, sizeof(uint32_t));
+}
+
+static void
+hash_deinit(hash_t *hash) {
+    free(hash->codes);
+}
+
 
 /**
  * Write out a call flow to the log file.
@@ -246,7 +246,7 @@ find_r_debug() {
     ELFT(Dyn) *dyn;
 
     dyn = find_executable_dynamic_section();
-    ASSERTION(dyn != NULL, "dlsym() error!");
+    ASSERTION(dyn != NULL, "fail to get dynamic section!");
     for (; dyn->d_tag != DT_NULL; dyn++) {
         if (dyn->d_tag == DT_DEBUG) {
             r_debug = (struct r_debug *)dyn->d_un.d_ptr;
@@ -257,7 +257,30 @@ find_r_debug() {
 }
 
 /**
+ * Compute digest code for a link map.
+ *
+ * It may be not good, but it is fast and the number of link_map is
+ * small.  I don't go to fix it until someday and someone's crying.
+ * Let's bless no confliction.
+ */
+static uint32_t
+link_map_digest_code(struct link_map *map) {
+    addr_type addr = map->l_addr;
+    uint32_t code;
+
+    code = addr ^ (addr >> 8) ^ 0xdadbeef;
+    code = code ^ (addr >> 16);
+#if ELF_WORD == 64
+    code = code ^ (addr >> 32);
+#endif
+    ASSERTION(code != 0, "bad link map digest!");
+
+    return code;
+}
+
+/**
  * Write out memory map of the current process to the log file.
+ * Write out only new link maps of the process.
  */
 static void
 write_out_maps(uncall_context_t *ctx) {
@@ -269,9 +292,11 @@ write_out_maps(uncall_context_t *ctx) {
     int addr_buf_sz = 64;
     int addr_buf_sz_wanted;
     char *addr_buf = (char*)malloc(addr_buf_sz);
+    uint32_t code;
+    int existing;
     int cp;
 
-    r_debug = find_r_debug();
+    r_debug = ctx->r_debug;
     ASSERTION(r_debug != NULL, "Can not find r_debug!");
 
     map = r_debug->r_map;
@@ -281,6 +306,13 @@ write_out_maps(uncall_context_t *ctx) {
             filename = map->l_name;
         } else {
             filename = program_invocation_name;
+        }
+
+        code = link_map_digest_code(map);
+        existing = hash_put(&ctx->maps_dup, code);
+        if (existing) {
+            map = map->l_next;
+            continue;
         }
 
         addr_buf_sz_wanted = (ELF_WORD / 4) + 8 + strlen(filename);
@@ -319,11 +351,13 @@ uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
 
     bzero(ctx, sizeof(uncall_context_t));
 
+    ctx->r_debug = find_r_debug();
+
     ctx->max_depth = max_depth;
     ctx->flow_buf = (unw_word_t*)malloc(sizeof(unw_word_t) * max_depth);
 
-    ctx->dup_book_size = UNC_DUP_BOOK_SIZE_START;
-    ctx->dup_book = (uint32_t*)calloc(ctx->dup_book_size, sizeof(uint32_t));
+    hash_init(&ctx->flows_dup, FLOWS_DUP_START_SIZE);
+    hash_init(&ctx->maps_dup, MAPS_DUP_START_SIZE);
 
     RC4_init(&ctx->rc4_init, key, sizeof(key));
 
@@ -338,7 +372,8 @@ uncall_context_init(uncall_context_t *ctx, int max_depth, int logfd) {
 void
 uncall_context_destroy(uncall_context_t *ctx) {
     free(ctx->flow_buf);
-    free(ctx->dup_book);
+    hash_deinit(&ctx->flows_dup);
+    hash_deinit(&ctx->maps_dup);
 }
 
 /**
@@ -384,7 +419,7 @@ uncall(uncall_context_t *ctx) {
     int flow_size;
     int flow_bytes;
     RC4_state_t *rc4;
-    uint32_t flow_code;
+    uint32_t flow_code;         /* the digest of the call flow */
     int existing;
 
     flow = ctx->flow_buf;
@@ -405,8 +440,18 @@ uncall(uncall_context_t *ctx) {
               "The flow code is assumed unlikely to be 0."
               "  You are really unlucky!");
 
-    existing = bookmark_flow_code(ctx, flow_code);
+    /* Make sure this call flow is not ths same as any exisiting one. */
+    existing = hash_put(&ctx->flows_dup, flow_code);
     if (!existing) {
+        /*
+         * Write out new link maps if there is.  A better solution is
+         * to check link maps once any new shared object is loaded or
+         * unloaded.  We could hook-up the function of r_debug::r_brk,
+         * but it should leverage breakpoints and signal handlers that
+         * is laborious.  Let's left it to someday future.
+         */
+        write_out_maps(ctx);
+
         /* new one */
         log_flow(ctx, flow, flow_size);
     }
