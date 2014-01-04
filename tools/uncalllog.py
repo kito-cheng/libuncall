@@ -386,17 +386,15 @@ def decode_func_name_CU(CU, addr):
 class _CU_finder(object):
     @staticmethod
     def _CU_range_list(CU):
-        try:
-            range_lists = CU.dwarfinfo.range_lists()
-        except AttributeError:
-            # no ranges section in the elf file.
-            return []
-        
         top_DIE = CU.get_top_DIE()
-        try:
-            range_offset = top_DIE.attributes['DW_AT_ranges'].value
-        except KeyError:
-            return []
+        
+        if not top_DIE.attributes.has_key('DW_AT_ranges'):
+            low = top_DIE.attributes['DW_AT_low_pc'].value
+            high = top_DIE.attributes['DW_AT_high_pc'].value
+            return [(low, high)]
+        
+        range_offset = top_DIE.attributes['DW_AT_ranges'].value
+        range_lists = CU.dwarfinfo.range_lists()
         range_list = range_lists.get_range_list_at_offset(range_offset)
         range_pairs = [(range.begin_offset, range.end_offset)
                        for range in  range_list]
