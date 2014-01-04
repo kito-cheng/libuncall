@@ -4,7 +4,7 @@ import re, bisect
 import gc
 
 
-reo_mapsline = re.compile('([0-9a-f]+)-([0-9-a-f]+) ..x. ([0-9a-f]+) ([0-9a-f:]+) ([0-9]+) *([^ ]+)')
+reo_mapsline = re.compile('([0-9a-f]+)-([0-9-a-f]+) ..x. ([0-9a-f]+) ([0-9:]+) ([0-9]+) *([^ ]+)')
 
 class maps(object):
     def __init__(self):
