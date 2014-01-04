@@ -438,7 +438,8 @@ class _CU_finder(object):
         if len(sorted_map) == 0:
             return 0
         
-        closest_idx = bisect.bisect_right(sorted_map_low, addr)
+        closest_idx = min(bisect.bisect_right(sorted_map_low, addr),
+                          len(sorted_map_low) - 1)
         #
         # Since all low addresses before this one are always lower
         # than or equal to this one, and the biggest high address
