@@ -4,12 +4,13 @@ import re, bisect
 import gc
 
 
-reo_mapsline = re.compile('([0-9a-f]+)-([0-9-a-f]+) ..x. ([0-9a-f]+) ([0-9:]+) ([0-9]+) *([^ ]+)')
+reo_mapsline = re.compile('([0-9a-f]+) ([^ ]+)')
 
 class maps(object):
     def __init__(self):
         super(maps, self).__init__()
         self._maps = []
+        self._bases = []
         self._last_lookup_cache = (None, None, None, None)
         pass
     
@@ -18,6 +19,7 @@ class maps(object):
             self.parse_line(line)
             pass
         self.sort_maps()
+        self._bases = [base for base, filename in self._maps]
         pass
     
     def parse_line(self, line):
@@ -25,8 +27,7 @@ class maps(object):
         if not mo:
             return
         item = (int(mo.group(1), 16),
-                int(mo.group(2), 16),
-                mo.group(6))
+                mo.group(2))
         self._maps.append(item)
         pass
 
@@ -37,19 +38,19 @@ class maps(object):
     def lookup_address(self, address):
         if address == self._last_lookup_cache[0]:
             return self._last_lookup_cache[1:]
-        
-        for start, stop, filename in self._maps:
-            if address >= start and address < stop:
-                self._last_lookup_cache = (address, start, stop, filename)
-                return (start, stop, filename)
-            pass
+
+        idx = bisect.bisect_right(self._bases, address) - 1
+        if idx >= 0:
+            base, filename = self._maps[idx]
+            self._last_lookup_cache = (address, base, filename)
+            return (base, filename)
         pass
 
     def lookup_address_rel(self, address):
         value = self.lookup_address(address)
         if value is not None:
-            start, stop, filename = value
-            return address - start, filename
+            base, filename = value
+            return address - base, filename
         pass
     pass
 
@@ -149,7 +150,10 @@ class dwarf_resolver(object):
         
         rel, so = rel_so
         if so not in self._elfs_cache:
-            fo = file(so, 'r')
+            try:
+                fo = file(so, 'r')
+            except:
+                return
             elf = ELFFile(fo, bytesio=False)
             self._elfs_cache[so] = elf
             pass

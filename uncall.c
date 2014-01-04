@@ -8,7 +8,16 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
+#include <link.h>
+
+#define ELF_WORD 64
+#define ELFT(t) _ELFT1(Elf,ELF_WORD,t)
+#define _ELFT1(e,w,t) _ELFT(e,w,_##t)
+#define _ELFT(e,w,t) e##w##t
+
+typedef ELFT(Addr) addr_type;
 
 #ifndef ASSERTION
 #define ASSERTION(x, reason) if (!(x)) { abort(); }
@@ -180,51 +189,122 @@ log_flow(uncall_context_t *ctx, unw_word_t *flow, int size) {
     free(buf);
 }
 
+static int
+find_so_phdr(const char *fname, ELFT(Phdr) **phdrs) {
+    ELFT(Ehdr) elfhdr;
+    ELFT(Phdr) *_phdrs;
+    int progfd;
+    int cp, offset;
+
+    progfd = open(fname, O_RDONLY);
+    if (progfd < 0) {
+        return -1;
+    }
+
+    cp = read(progfd, &elfhdr, sizeof(elfhdr));
+    ASSERTION(cp == sizeof(elfhdr), "IO error!");
+
+    _phdrs = (ELFT(Phdr) *)malloc(sizeof(ELFT(Phdr)) * elfhdr.e_phnum);
+    offset = lseek(progfd, elfhdr.e_phoff, SEEK_SET);
+    ASSERTION(offset == elfhdr.e_phoff, "IO error!");
+    cp = read(progfd, _phdrs, sizeof(ELFT(Phdr)) * elfhdr.e_phnum);
+    ASSERTION(cp == sizeof(ELFT(Phdr)) * elfhdr.e_phnum, "IO error!");
+
+    close(progfd);
+
+    *phdrs = _phdrs;
+
+    return elfhdr.e_phnum;;
+}
+
+static ELFT(Dyn) *
+find_executable_dynamic_section() {
+    extern char *program_invocation_name;
+    ELFT(Phdr) *phdrs = NULL;
+    ELFT(Dyn) *dyn = NULL;
+    int phnum;
+    int i;
+
+    phnum = find_so_phdr(program_invocation_name, &phdrs);
+    ASSERTION(phnum >= 0, "fail to load the program headers!");
+
+    for (i = 0; i < phnum; i++) {
+        if (phdrs[i].p_type == PT_DYNAMIC) {
+            dyn = (ELFT(Dyn) *)phdrs[i].p_vaddr;
+            break;
+        }
+    }
+
+    free(phdrs);
+
+    return dyn;
+}
+
+static struct r_debug *
+find_r_debug() {
+    struct r_debug *r_debug = NULL;
+    ELFT(Dyn) *dyn;
+
+    dyn = find_executable_dynamic_section();
+    ASSERTION(dyn != NULL, "dlsym() error!");
+    for (; dyn->d_tag != DT_NULL; dyn++) {
+        if (dyn->d_tag == DT_DEBUG) {
+            r_debug = (struct r_debug *)dyn->d_un.d_ptr;
+            break;
+        }
+    }
+    return r_debug;
+}
+
 /**
  * Write out memory map of the current process to the log file.
  */
 static void
 write_out_maps(uncall_context_t *ctx) {
-    static const char map_prefix[] = "MAP: ";
-    int mapsfd, rdsz, wrsz, remain, wrsz_expect;
-    char buf[IO_BUF_SIZE];
-    char *ptr, *eol;
-    int start_of_line = 1;
+    extern char *program_invocation_name;
+    struct r_debug *r_debug;
+    struct link_map *map;
+    ELFT(Addr) addr;
+    char *filename;
+    int addr_buf_sz = 64;
+    int addr_buf_sz_wanted;
+    char *addr_buf = (char*)malloc(addr_buf_sz);
+    int cp;
 
-    mapsfd = open("/proc/self/maps", O_RDONLY);
-    ASSERTION(mapsfd >= 0, "incompatible paltform!");
+    r_debug = find_r_debug();
+    ASSERTION(r_debug != NULL, "Can not find r_debug!");
 
-    while ((rdsz = read(mapsfd, buf, IO_BUF_SIZE - 1)) > 0) {
-        buf[rdsz] = 0;
-        remain = rdsz;
-        ptr = buf;
-        while (remain > 0) {
-            if (start_of_line) {
-                wrsz = write(ctx->logfd, map_prefix, sizeof(map_prefix) - 1);
-                ASSERTION(wrsz == strlen(map_prefix), "IO error!");
-            }
-
-            eol = strchr(ptr, '\n');
-            if (eol != NULL) {
-                wrsz_expect = eol - ptr + 1;
-            } else {
-                wrsz_expect = remain;
-            }
-
-            wrsz = write(ctx->logfd, ptr, wrsz_expect);
-            ASSERTION(wrsz > 0, "IO error!");
-
-            remain -= wrsz;
-            ptr += wrsz;
-            start_of_line = 1;
-            if (eol == NULL || wrsz != wrsz_expect) {
-                start_of_line = 0;
-            }
+    map = r_debug->r_map;
+    while(map != NULL) {
+        addr = map->l_addr;
+        if (addr) {
+            filename = map->l_name;
+        } else {
+            filename = program_invocation_name;
         }
-    }
-    ASSERTION(rdsz >= 0, "IO error!");
 
-    close(mapsfd);
+        addr_buf_sz_wanted = (ELF_WORD / 4) + 8 + strlen(filename);
+        if (addr_buf_sz < addr_buf_sz_wanted) {
+            free(addr_buf);
+            while (addr_buf_sz < addr_buf_sz_wanted)
+                addr_buf_sz <<= 1;
+            addr_buf = (char *)malloc(addr_buf_sz);
+        }
+#if ELF_WORD == 32
+        sprintf(addr_buf, "MAP: %08x %s\n", addr, filename);
+#elif ELF_WORD == 64
+        sprintf(addr_buf, "MAP: %016x %s\n", addr, filename);
+#else
+#error "Unknown ELF_WORD size!"
+#endif
+        cp = write(ctx->logfd, addr_buf, addr_buf_sz_wanted - 1);
+        ASSERTION(cp == (addr_buf_sz_wanted - 1),
+                  "IO Error!");
+
+        map = map->l_next;
+    }
+
+    free(addr_buf);
 }
 
 /**
