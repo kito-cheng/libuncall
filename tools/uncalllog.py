@@ -386,7 +386,11 @@ def decode_func_name_CU(CU, addr):
 class _CU_finder(object):
     @staticmethod
     def _CU_range_list(CU):
-        range_lists = CU.dwarfinfo.range_lists()
+        try:
+            range_lists = CU.dwarfinfo.range_lists()
+        except AttributeError:
+            # no ranges section in the elf file.
+            return []
         
         top_DIE = CU.get_top_DIE()
         try:
