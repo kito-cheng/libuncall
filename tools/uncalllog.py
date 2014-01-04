@@ -389,9 +389,12 @@ class _CU_finder(object):
         top_DIE = CU.get_top_DIE()
         
         if not top_DIE.attributes.has_key('DW_AT_ranges'):
-            low = top_DIE.attributes['DW_AT_low_pc'].value
-            high = top_DIE.attributes['DW_AT_high_pc'].value
-            return [(low, high)]
+            try:
+                low = top_DIE.attributes['DW_AT_low_pc'].value
+                high = top_DIE.attributes['DW_AT_high_pc'].value
+                return [(low, high)]
+            except KeyError:
+                return []
         
         range_offset = top_DIE.attributes['DW_AT_ranges'].value
         range_lists = CU.dwarfinfo.range_lists()
