@@ -2,6 +2,7 @@
 from elftools.elf.elffile import ELFFile
 import re, bisect
 import gc
+import asyncore
 
 
 reo_mapsline = re.compile('([0-9a-f]+) ([^ ]+)')
@@ -120,7 +121,7 @@ def DIE_values(DIE):
     values.append(('offset', DIE.offset))
     return dict(values)
 
-def filter_CU_DIEs(CU):
+def _filter_CU_DIEs(CU):
     try:
         return CU.DIEs_filtered_cache
     except:
@@ -131,6 +132,37 @@ def filter_CU_DIEs(CU):
         gc.collect()
         pass
     return CU.DIEs_filtered_cache
+
+def _install_CU_DIEs(CU, DIEs):
+    CU.DIEs_filtered_cache = DIEs
+    pass
+
+
+class ELF_manager(object):
+    _elfs_cache = {}
+    
+    @classmethod
+    def get_elf(self, so):
+        if so not in self._elfs_cache:
+            try:
+                fo = file(so, 'r')
+            except:
+                return
+            elf = ELFFile(fo, bytesio=False)
+            self._elfs_cache[so] = elf
+            pass
+
+        elf = self._elfs_cache[so]
+        return elf
+    pass
+
+
+def _get_elf_dwarf(elf):
+    if not hasattr(elf, '_dwarf_cache'):
+        elf._dwarf_cache = elf.get_dwarf_info()
+        pass
+    dwarf = elf._dwarf_cache
+    return dwarf
 
 
 class dwarf_resolver(object):
@@ -149,19 +181,11 @@ class dwarf_resolver(object):
             return
         
         rel, so = rel_so
-        if so not in self._elfs_cache:
-            try:
-                fo = file(so, 'r')
-            except:
-                return
-            elf = ELFFile(fo, bytesio=False)
-            self._elfs_cache[so] = elf
-            pass
-
-        elf = self._elfs_cache[so]
+        elf = ELF_manager.get_elf(so)
+        
         return elf, rel
     
-    def _addr_to_CU(self, addr):
+    def addr_to_CU_rel(self, addr):
         if self._last_addr == addr:
             return self._last_CU, self._last_laddr
         
@@ -175,9 +199,7 @@ class dwarf_resolver(object):
         else:
             laddr = rel - 1       # for x86, IP is at next opcode.
             pass
-        if not hasattr(elf, '_dwarf_cache'):
-            elf._dwarf_cache = elf.get_dwarf_info()
-        dwarf = elf._dwarf_cache
+        dwarf = _get_elf_dwarf(elf)
         CU = _CU_finder.addr_to_CU(dwarf, laddr)
         if CU is None:
             return
@@ -187,7 +209,7 @@ class dwarf_resolver(object):
         return CU, laddr
 
     def decode_func_name(self, addr):
-        CU_rel = self._addr_to_CU(addr)
+        CU_rel = self.addr_to_CU_rel(addr)
         if CU_rel is None:
             return
         CU, rel = CU_rel
@@ -195,7 +217,7 @@ class dwarf_resolver(object):
         return func_name
 
     def decode_file_line(self, addr):
-        CU_rel_pair = self._addr_to_CU(addr)
+        CU_rel_pair = self.addr_to_CU_rel(addr)
         found_CU = CU_rel_pair is not None
         rv = (found_CU
               and decode_file_line(*CU_rel_pair)   # (file, line) pair
@@ -207,6 +229,10 @@ class dwarf_resolver(object):
 def print_flows_symbols(log, concurrent=1):
     result_cache = {}
     resolver = dwarf_resolver(log)
+
+    if concurrent > 1:
+        _concurrent_prepare_DIEs(concurrent, resolver, log)
+        pass
     
     for i in range(len(log.flows)):
         print 'FLOW:'
@@ -240,6 +266,11 @@ def print_flows_symbols(log, concurrent=1):
 
 def print_flows_dot(log, concurrent=1):
     resolver = dwarf_resolver(log)
+    
+    if concurrent > 1:
+        _concurrent_prepare_DIEs(concurrent, resolver, log)
+        pass
+    
     all_addrs = set([addr
                      for flow in log.flows
                      for addr in flow])
@@ -353,7 +384,7 @@ def get_name(DIE):
     return DIE['DW_AT_name']
 
 def find_spec_name(CU, spec_off):
-    for DIE in filter_CU_DIEs(CU):
+    for DIE in _filter_CU_DIEs(CU):
         if DIE['offset'] == spec_off:
             try:
                 return get_name(DIE)
@@ -364,7 +395,7 @@ def find_spec_name(CU, spec_off):
     pass
 
 def decode_func_name_CU(CU, addr):
-    for DIE in filter_CU_DIEs(CU):
+    for DIE in _filter_CU_DIEs(CU):
         try:
             lowpc = DIE['DW_AT_low_pc']
             hipc = DIE['DW_AT_high_pc']
@@ -505,6 +536,235 @@ def decode_file_line(CU, addr):
     pass
 
 
+class slave_server(object):
+    @staticmethod
+    def parse_CU_DIEs(so_fname, CU_addr):
+        elf = ELF_manager.get_elf(so_fname)
+        dwarf = _get_elf_dwarf(elf)
+        CU = _CU_finder.addr_to_CU(dwarf, CU_addr)
+        DIEs = _filter_CU_DIEs(CU)
+        return DIEs
+    
+    @staticmethod
+    def run():
+        from sys import stdin, stdout, stderr
+        from base64 import b64encode
+
+        while True:
+            lines = []
+            line = stdin.readline().strip()
+            while line:
+                if line.startswith('last: '):
+                    lines.append(line[6:])
+                    break
+                if line.startswith('cont: '):
+                    lines.append(line[6:])
+                else:
+                    raise ValueError, 'Invalid format "%s"' % line
+                line = stdin.readline().strip()
+                pass
+            
+            if len(lines) == 0:
+                break
+            
+            cmd = lines[0]
+            if cmd == 'parse_CU_DIEs':
+                so_fname = lines[1].strip()
+                CU_addr = int(lines[2].strip())
+                
+                DIEs = slave_server.parse_CU_DIEs(so_fname, CU_addr)
+                reply = b64encode(repr((so_fname, CU_addr, DIEs)))
+                
+                start, end = 0, 64
+                while end < len(reply):
+                    print >> stdout, 'cont: %s' % reply[start:end]
+                    start = end
+                    end = end + 64
+                    pass
+                if start < len(reply):
+                    print >> stdout, 'last: %s' % reply[start:]
+                    pass
+                
+                stdout.flush()
+                pass
+            pass
+        pass
+    pass
+
+
+class slave_handler(asyncore.file_dispatcher):
+    def __init__(self, master, slave):
+        asyncore.file_dispatcher.__init__(self, slave.stdout)
+        self._master = master
+        self._slave = slave
+        self._data_queue = ''
+        slave.stdout.close()
+        pass
+
+    def writable(self):
+        return False
+
+    def _handle_reply(self, lines):
+        from base64 import b64decode
+        
+        _lines = [line[6:].strip() for line in lines]
+        reply_msg = b64decode(''.join(_lines))
+        reply = eval(reply_msg)
+        
+        so, addr, DIEs = reply
+        self._master.handle_reply(so, addr, DIEs)
+        self._master.slave_go_idle(self._slave)
+        pass
+
+    def handle_read(self):
+        buf = self.recv(1024)
+        self._data_queue = self._data_queue + buf
+        
+        lines = self._data_queue.split('\n')
+        self._data_queue = lines[-1]
+        
+        cmd_lines = []
+        for line in lines[:-1]:
+            line = line.strip()
+            if not line:
+                continue
+
+            cmd_lines.append(line)
+            
+            if line.startswith('last: '):
+                self._handle_reply(cmd_lines)
+                cmd_lines = []
+                pass
+            pass
+        pass
+    pass
+
+class _concurrent_master(object):
+    def __init__(self, concurrent, dwarf_resolver, log):
+        super(_concurrent_master, self).__init__()
+        self._concurrent = concurrent
+        self._dwarf_resolver = dwarf_resolver
+        self._log = log
+        self._all_CUs = set()
+        self._all_slaves = []
+        self._all_slave_handlers = []
+        pass
+
+    def _start_slave(self):
+        import subprocess, sys
+        
+        slave = subprocess.Popen(['python', sys.argv[0], '--slave'],
+                                 stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE)
+        
+        return slave
+
+    def _start_slaves(self):
+        self._all_slaves = [self._start_slave()
+                            for i in range(self._concurrent)]
+        self._all_slave_handlers = [slave_handler(self, slave)
+                                    for slave in self._all_slaves]
+        pass
+
+    def _stop_slaves(self):
+        for slave in self._all_slaves:
+            slave.kill()
+            pass
+        self._all_slaves = []
+        pass
+
+    def _make_CU_DIEs_task(self, addr):
+        log = self._log
+        dwarf_resolver = self._dwarf_resolver
+        all_CUs = self._all_CUs
+
+        rel_so_pair = log.maps.lookup_address_rel(addr)
+        if rel_so_pair is not None:
+            rel, so = rel_so_pair
+            CU_rel = dwarf_resolver.addr_to_CU_rel(addr)
+            if (CU_rel is not None) and (CU_rel[0] not in self._all_CUs):
+                CU, rel = CU_rel
+                all_CUs.add(CU)
+                return (so, rel, CU)
+            pass
+        return None
+
+    def _feed_idle_slaves(self):
+        while self._idle_slaves and self._waiting:
+            slave = self._idle_slaves[0]
+            self._busy_slaves.append(slave)
+            del self._idle_slaves[0]
+            
+            so, addr, CU = self._waiting[0]
+            self._running.append(self._waiting[0])
+            del self._waiting[0]
+            
+            print >> slave.stdin, 'cont: parse_CU_DIEs'
+            print >> slave.stdin, 'cont: %s' % so
+            print >> slave.stdin, 'last: %s' % addr
+            pass
+        pass
+
+    def handle_reply(self, so, addr, DIEs):
+        for i, (_so, _addr, CU) in enumerate(self._running):
+            if _so == so and _addr == addr:
+                _install_CU_DIEs(CU, DIEs)
+                del self._running[i]
+                return
+            pass
+        raise ValueError, 'invalid reply %x@%s' % (addr, so)
+
+    def slave_go_idle(self, slave):
+        if slave not in self._busy_slaves:
+            raise RuntimeError, 'unknown slave!'
+        
+        self._busy_slaves.remove(slave)
+        self._idle_slaves.append(slave)
+        pass
+
+    def _wait_busy_slaves(self):
+        if self._busy_slaves:
+            asyncore.loop(count=1)
+            pass
+        pass
+
+    def _dispatch_tasks(self):
+        self._waiting = list(self._all_tasks)
+        self._running = []
+        
+        self._idle_slaves = list(self._all_slaves)
+        self._busy_slaves = []
+        
+        while self._waiting or self._running:
+            self._feed_idle_slaves()
+            self._wait_busy_slaves()
+            pass
+        pass
+    
+    def prepare_DIEs(self):
+        self._start_slaves()
+        
+        log = self._log
+        all_addrs = sorted(set([addr for flow in log.flows for addr in flow]))
+        all_tasks = set([self._make_CU_DIEs_task(addr)
+                         for addr in all_addrs])
+        if None in all_tasks:
+            all_tasks.remove(None)
+            pass
+
+        self._all_tasks = list(all_tasks)
+        self._dispatch_tasks()
+        
+        self._stop_slaves()
+        pass
+    pass
+
+def _concurrent_prepare_DIEs(concurrent, dwarf_resolver, log):
+    master = _concurrent_master(concurrent, dwarf_resolver, log)
+    master.prepare_DIEs()
+    pass
+
+
 if __name__ == '__main__':
     import sys, pprint, optparse
     
@@ -515,8 +775,16 @@ if __name__ == '__main__':
     parser.add_option('-j', dest='concurrent',
                       default=1, type='int',
                       help='Concurrent level!')
+    parser.add_option('--slave', dest='slave',
+                      action='store_true', default=False,
+                      help='This is internal command of uncalllog.py' + \
+                        ' for concurrent!')
     options, args = parser.parse_args()
-    
+
+    if options.slave:
+        slave_server.run()
+        sys.exit(0)
+        
     filename = args[0]
     log = uncall_log()
     log.load(filename)
