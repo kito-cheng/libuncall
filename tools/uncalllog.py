@@ -435,11 +435,10 @@ class _CU_finder(object):
         return range_pairs
     
     @staticmethod
-    def _sorted_CU_map(dwarf):
-        if hasattr(dwarf, 'sorted_CU_map'):
-            return (dwarf.sorted_CU_map,
-                    dwarf.sorted_CU_map_low,
-                    dwarf.sorted_CU_map_high_before)
+    def _get_CU_map(dwarf):
+        if hasattr(dwarf, '_CU_map'):
+            return dwarf._CU_map
+        
         def silence_fault_for_dwarf_iter_CUs():
             try:
                 for CU in dwarf.iter_CUs():
@@ -448,9 +447,21 @@ class _CU_finder(object):
             except AttributeError:           # No .debug_info section?
                 pass
             pass
+        
         CU_map = [(low, high, CU)
                   for CU in silence_fault_for_dwarf_iter_CUs()
                   for low, high in _CU_finder._CU_range_list(CU)]
+        dwarf._CU_map = CU_map
+        
+        return CU_map
+    
+    @staticmethod
+    def _sorted_CU_map(dwarf):
+        if hasattr(dwarf, 'sorted_CU_map'):
+            return (dwarf.sorted_CU_map,
+                    dwarf.sorted_CU_map_low,
+                    dwarf.sorted_CU_map_high_before)
+        CU_map = _CU_finder._get_CU_map(dwarf)
         CU_map.sort(key=lambda x: x[0])   # This is a stable sorting.
         CU_map_low = [low for low, high, CU in CU_map]
         
