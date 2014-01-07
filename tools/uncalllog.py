@@ -454,6 +454,14 @@ class _CU_finder(object):
         dwarf._CU_map = CU_map
         
         return CU_map
+
+    @staticmethod
+    def append_CU_map(dwarf, CU_map):
+        if not hasattr(dwarf, '_CU_map'):
+            dwarf._CU_map = []
+            pass
+        dwarf._CU_map = dwarf._CU_map + CU_map
+        pass
     
     @staticmethod
     def _sorted_CU_map(dwarf):
@@ -461,6 +469,8 @@ class _CU_finder(object):
             return (dwarf.sorted_CU_map,
                     dwarf.sorted_CU_map_low,
                     dwarf.sorted_CU_map_high_before)
+        import time
+        last = time.time()
         CU_map = _CU_finder._get_CU_map(dwarf)
         CU_map.sort(key=lambda x: x[0])   # This is a stable sorting.
         CU_map_low = [low for low, high, CU in CU_map]
@@ -547,6 +557,24 @@ def decode_file_line(CU, addr):
     pass
 
 
+def _b64encode_lines(data):
+    from base64 import b64encode
+    
+    data_b64 = b64encode(data)
+    lines = []
+    
+    start, end = 0, 64
+    while end < len(data_b64):
+        lines.append(data_b64[start:end])
+        start = end
+        end = end + 64
+        pass
+    if start < len(data_b64):
+        lines.append(data_b64[start:])
+        pass
+    
+    return lines
+
 class slave_server(object):
     @staticmethod
     def parse_CU_DIEs(so_fname, CU_addr):
@@ -555,6 +583,17 @@ class slave_server(object):
         CU = _CU_finder.addr_to_CU(dwarf, CU_addr)
         DIEs = _filter_CU_DIEs(CU)
         return DIEs
+
+    @staticmethod
+    def parse_CU_map(so_fname, CU_offsets):
+        elf = ELF_manager.get_elf(so_fname)
+        dwarf = _get_elf_dwarf(elf)
+        CUs = [dwarf._parse_CU_at_offset(cu_offset)
+               for cu_offset in CU_offsets]
+        CU_map = [(low, high, CU.cu_offset)
+                  for CU in CUs
+                  for low, high in _CU_finder._CU_range_list(CU)]
+        return CU_map
     
     @staticmethod
     def run():
@@ -584,20 +623,29 @@ class slave_server(object):
                 CU_addr = int(lines[2].strip())
                 
                 DIEs = slave_server.parse_CU_DIEs(so_fname, CU_addr)
-                reply = b64encode(repr((so_fname, CU_addr, DIEs)))
+                reply_lines = _b64encode_lines(repr((so_fname, CU_addr, DIEs)))
                 
-                start, end = 0, 64
-                while end < len(reply):
-                    print >> stdout, 'cont: %s' % reply[start:end]
-                    start = end
-                    end = end + 64
+                print >> stdout, 'cont: reply_parse_CU_DIEs'
+                for reply in reply_lines[:-1]:
+                    print >> stdout, 'cont: %s' % reply
                     pass
-                if start < len(reply):
-                    print >> stdout, 'last: %s' % reply[start:]
-                    pass
-                
-                stdout.flush()
+                print >> stdout, 'last: %s' % reply_lines[-1]
                 pass
+            elif cmd == 'parse_CU_map':
+                so_fname = lines[1].strip()
+                CU_offsets = eval(lines[2].strip())
+                
+                CU_map = slave_server.parse_CU_map(so_fname, CU_offsets)
+                
+                print >> stdout, 'cont: reply_parse_CU_map'
+                print >> stdout, 'cont: %s' % so_fname
+                reply_lines = _b64encode_lines(repr(CU_map))
+                for reply in reply_lines[:-1]:
+                    print >> stdout, 'cont: %s' % reply
+                    pass
+                print >> stdout, 'last: %s' % reply_lines[-1]
+                pass
+            stdout.flush()
             pass
         pass
     pass
@@ -609,13 +657,14 @@ class slave_handler(asyncore.file_dispatcher):
         self._master = master
         self._slave = slave
         self._data_queue = ''
+        self._cmd_lines = []
         slave.stdout.close()
         pass
 
     def writable(self):
         return False
 
-    def _handle_reply(self, lines):
+    def _reply_parse_CU_DIEs(self, lines):
         from base64 import b64decode
         
         _lines = [line[6:].strip() for line in lines]
@@ -627,6 +676,28 @@ class slave_handler(asyncore.file_dispatcher):
         self._master.slave_go_idle(self._slave)
         pass
 
+    def _reply_parse_CU_map(self, lines):
+        from base64 import b64decode
+
+        so_fname = lines[0][6:].strip()
+        _lines = [line[6:].strip() for line in lines[1:]]
+        reply_msg = b64decode(''.join(_lines))
+        reply = eval(reply_msg)
+
+        self._master.handle_reply_CU_map(so_fname, reply)
+        self._master.slave_go_idle(self._slave)
+        pass
+
+    def _handle_reply(self, lines):
+        cmd = lines[0][6:].strip()
+        
+        if cmd == 'reply_parse_CU_DIEs':
+            self._reply_parse_CU_DIEs(lines[1:])
+        elif cmd == 'reply_parse_CU_map':
+            self._reply_parse_CU_map(lines[1:])
+            pass
+        pass
+
     def handle_read(self):
         buf = self.recv(1024)
         self._data_queue = self._data_queue + buf
@@ -634,7 +705,7 @@ class slave_handler(asyncore.file_dispatcher):
         lines = self._data_queue.split('\n')
         self._data_queue = lines[-1]
         
-        cmd_lines = []
+        cmd_lines = self._cmd_lines
         for line in lines[:-1]:
             line = line.strip()
             if not line:
@@ -644,7 +715,7 @@ class slave_handler(asyncore.file_dispatcher):
             
             if line.startswith('last: '):
                 self._handle_reply(cmd_lines)
-                cmd_lines = []
+                cmd_lines[:] = []
                 pass
             pass
         pass
@@ -659,6 +730,7 @@ class _concurrent_master(object):
         self._all_CUs = set()
         self._all_slaves = []
         self._all_slave_handlers = []
+        self._all_SOs = set()
         pass
 
     def _start_slave(self):
@@ -684,6 +756,72 @@ class _concurrent_master(object):
         self._all_slaves = []
         pass
 
+    def _make_CU_map_tasks(self, addr):
+        rel_so_pair = self._log.maps.lookup_address_rel(addr)
+        if rel_so_pair is None:
+            return []
+        rel, so = rel_so_pair
+
+        if so in self._all_SOs:
+            return []
+        self._all_SOs.add(so)
+        
+        elf = ELF_manager.get_elf(so)
+        dwarf = _get_elf_dwarf(elf)
+        
+        def silence_fault_for_dwarf_iter_CUs():
+            try:
+                for CU in dwarf.iter_CUs():
+                    yield CU
+                    pass
+            except AttributeError:           # No .debug_info section?
+                pass
+            pass
+        
+        CUs = [CU for CU in silence_fault_for_dwarf_iter_CUs()]
+        if not CUs:
+            return []
+        
+        if len(CUs) > 5000:
+            task_sz = 50
+        elif len(CUs) > 1000:
+            task_sz = 25
+        elif len(CUs) > 100:
+            task_sz = 15
+        else:
+            task_sz = len(CUs)
+            pass
+
+        tasks = [(so, tuple(CUs[idx : min(idx + task_sz, len(CUs))]))
+                 for idx in range(0, len(CUs), task_sz)]
+        return tasks
+
+    def _feed_slave_CU_map(self, slave, task):
+        so, CUs = task
+        print >> slave.stdin, 'cont: parse_CU_map'
+        print >> slave.stdin, 'cont: %s' % so
+        print >> slave.stdin, 'last: %s' % repr([CU.cu_offset
+                                                 for CU in CUs])
+        pass
+
+    def handle_reply_CU_map(self, so_fname, result_map):
+        for i, (so, CUs) in enumerate(self._running):
+            if so == so_fname:
+                break
+            pass
+        else:
+            raise ValueError, 'an invalid shared object name!'
+        del self._running[i]
+        
+        CU_map = [(low, high, CU)
+                  for low, high, cu_offset in result_map
+                  for CU in CUs
+                  if CU.cu_offset == cu_offset]
+        elf = ELF_manager.get_elf(so_fname)
+        dwarf = _get_elf_dwarf(elf)
+        _CU_finder.append_CU_map(dwarf, CU_map)
+        pass
+    
     def _make_CU_DIEs_task(self, addr):
         log = self._log
         dwarf_resolver = self._dwarf_resolver
@@ -700,19 +838,24 @@ class _concurrent_master(object):
             pass
         return None
 
-    def _feed_idle_slaves(self):
+    def _feed_slave_DIE(self, slave, task):
+        so, addr, CU = task
+        print >> slave.stdin, 'cont: parse_CU_DIEs'
+        print >> slave.stdin, 'cont: %s' % so
+        print >> slave.stdin, 'last: %s' % addr
+        pass
+
+    def _feed_idle_slaves(self, feeder):
         while self._idle_slaves and self._waiting:
             slave = self._idle_slaves[0]
             self._busy_slaves.append(slave)
             del self._idle_slaves[0]
             
-            so, addr, CU = self._waiting[0]
-            self._running.append(self._waiting[0])
+            task = self._waiting[0]
+            self._running.append(task)
             del self._waiting[0]
-            
-            print >> slave.stdin, 'cont: parse_CU_DIEs'
-            print >> slave.stdin, 'cont: %s' % so
-            print >> slave.stdin, 'last: %s' % addr
+
+            feeder(slave, task)
             pass
         pass
 
@@ -739,7 +882,7 @@ class _concurrent_master(object):
             pass
         pass
 
-    def _dispatch_tasks(self):
+    def _dispatch_tasks(self, feeder):
         self._waiting = list(self._all_tasks)
         self._running = []
         
@@ -747,16 +890,30 @@ class _concurrent_master(object):
         self._busy_slaves = []
         
         while self._waiting or self._running:
-            self._feed_idle_slaves()
+            self._feed_idle_slaves(feeder)
             self._wait_busy_slaves()
             pass
         pass
-    
+
     def prepare_DIEs(self):
         self._start_slaves()
-        
+
+        #
+        # CU map
+        #
         log = self._log
         all_addrs = sorted(set([addr for flow in log.flows for addr in flow]))
+
+        all_tasks = set([task
+                         for addr in all_addrs
+                         for task in self._make_CU_map_tasks(addr)])
+        
+        self._all_tasks = list(all_tasks)
+        self._dispatch_tasks(self._feed_slave_CU_map)
+
+        #
+        # DIEs
+        #
         all_tasks = set([self._make_CU_DIEs_task(addr)
                          for addr in all_addrs])
         if None in all_tasks:
@@ -764,7 +921,7 @@ class _concurrent_master(object):
             pass
 
         self._all_tasks = list(all_tasks)
-        self._dispatch_tasks()
+        self._dispatch_tasks(self._feed_slave_DIE)
         
         self._stop_slaves()
         pass
