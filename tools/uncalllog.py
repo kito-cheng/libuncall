@@ -469,8 +469,6 @@ class _CU_finder(object):
             return (dwarf.sorted_CU_map,
                     dwarf.sorted_CU_map_low,
                     dwarf.sorted_CU_map_high_before)
-        import time
-        last = time.time()
         CU_map = _CU_finder._get_CU_map(dwarf)
         CU_map.sort(key=lambda x: x[0])   # This is a stable sorting.
         CU_map_low = [low for low, high, CU in CU_map]
@@ -577,10 +575,10 @@ def _b64encode_lines(data):
 
 class slave_server(object):
     @staticmethod
-    def parse_CU_DIEs(so_fname, CU_addr):
+    def parse_CU_DIEs(so_fname, cu_offset):
         elf = ELF_manager.get_elf(so_fname)
         dwarf = _get_elf_dwarf(elf)
-        CU = _CU_finder.addr_to_CU(dwarf, CU_addr)
+        CU = dwarf._parse_CU_at_offset(cu_offset)
         DIEs = _filter_CU_DIEs(CU)
         return DIEs
 
@@ -620,10 +618,11 @@ class slave_server(object):
             cmd = lines[0]
             if cmd == 'parse_CU_DIEs':
                 so_fname = lines[1].strip()
-                CU_addr = int(lines[2].strip())
+                cu_offset = int(lines[2].strip())
                 
-                DIEs = slave_server.parse_CU_DIEs(so_fname, CU_addr)
-                reply_lines = _b64encode_lines(repr((so_fname, CU_addr, DIEs)))
+                DIEs = slave_server.parse_CU_DIEs(so_fname, cu_offset)
+                reply_lines = \
+                  _b64encode_lines(repr((so_fname, cu_offset, DIEs)))
                 
                 print >> stdout, 'cont: reply_parse_CU_DIEs'
                 for reply in reply_lines[:-1]:
@@ -671,9 +670,10 @@ class slave_handler(asyncore.file_dispatcher):
         reply_msg = b64decode(''.join(_lines))
         reply = eval(reply_msg)
         
-        so, addr, DIEs = reply
-        self._master.handle_reply(so, addr, DIEs)
-        self._master.slave_go_idle(self._slave)
+        so, cu_offset, DIEs = reply
+        slave_id = id(self._slave)
+        self._master.handle_reply_CU_DIEs(slave_id, so, cu_offset, DIEs)
+        self._master.slave_go_idle(slave_id)
         pass
 
     def _reply_parse_CU_map(self, lines):
@@ -684,13 +684,14 @@ class slave_handler(asyncore.file_dispatcher):
         reply_msg = b64decode(''.join(_lines))
         reply = eval(reply_msg)
 
-        self._master.handle_reply_CU_map(so_fname, reply)
-        self._master.slave_go_idle(self._slave)
+        slave_id = id(self._slave)
+        self._master.handle_reply_CU_map(slave_id, so_fname, reply)
+        self._master.slave_go_idle(slave_id)
         pass
 
     def _handle_reply(self, lines):
         cmd = lines[0][6:].strip()
-        
+
         if cmd == 'reply_parse_CU_DIEs':
             self._reply_parse_CU_DIEs(lines[1:])
         elif cmd == 'reply_parse_CU_map':
@@ -804,9 +805,9 @@ class _concurrent_master(object):
                                                  for CU in CUs])
         pass
 
-    def handle_reply_CU_map(self, so_fname, result_map):
-        for i, (so, CUs) in enumerate(self._running):
-            if so == so_fname:
+    def handle_reply_CU_map(self, slave_id, so_fname, result_map):
+        for i, (_slave_id, (so, CUs)) in enumerate(self._running):
+            if _slave_id == slave_id and so == so_fname:
                 break
             pass
         else:
@@ -831,49 +832,65 @@ class _concurrent_master(object):
         if rel_so_pair is not None:
             rel, so = rel_so_pair
             CU_rel = dwarf_resolver.addr_to_CU_rel(addr)
-            if (CU_rel is not None) and (CU_rel[0] not in self._all_CUs):
+            if (CU_rel is not None) and (CU_rel[0] not in all_CUs):
                 CU, rel = CU_rel
                 all_CUs.add(CU)
-                return (so, rel, CU)
+                return (so, CU)
             pass
         return None
 
     def _feed_slave_DIE(self, slave, task):
-        so, addr, CU = task
+        so, CU = task
         print >> slave.stdin, 'cont: parse_CU_DIEs'
         print >> slave.stdin, 'cont: %s' % so
-        print >> slave.stdin, 'last: %s' % addr
+        print >> slave.stdin, 'last: %s' % CU.cu_offset
         pass
 
     def _feed_idle_slaves(self, feeder):
         while self._idle_slaves and self._waiting:
             slave = self._idle_slaves[0]
-            self._busy_slaves.append(slave)
-            del self._idle_slaves[0]
+            slave_id = id(slave)
+            self.slave_go_busy(slave_id)
             
             task = self._waiting[0]
-            self._running.append(task)
+            self._running.append((slave_id, task))
             del self._waiting[0]
 
             feeder(slave, task)
             pass
         pass
 
-    def handle_reply(self, so, addr, DIEs):
-        for i, (_so, _addr, CU) in enumerate(self._running):
-            if _so == so and _addr == addr:
+    def handle_reply_CU_DIEs(self, slave_id, so, cu_offset, DIEs):
+        for i, (_slave_id, (_so, CU)) in enumerate(self._running):
+            if (_slave_id == slave_id
+                and _so == so
+                and CU.cu_offset == cu_offset):
                 _install_CU_DIEs(CU, DIEs)
                 del self._running[i]
                 return
             pass
         raise ValueError, 'invalid reply %x@%s' % (addr, so)
 
-    def slave_go_idle(self, slave):
-        if slave not in self._busy_slaves:
+    def slave_go_busy(self, slave_id):
+        for slave in self._idle_slaves:
+            if id(slave) == slave_id:
+                self._idle_slaves.remove(slave)
+                self._busy_slaves.append(slave)
+                break
+            pass
+        else:
             raise RuntimeError, 'unknown slave!'
-        
-        self._busy_slaves.remove(slave)
-        self._idle_slaves.append(slave)
+        pass
+    
+    def slave_go_idle(self, slave_id):
+        for slave in self._busy_slaves:
+            if id(slave) == slave_id:
+                self._busy_slaves.remove(slave)
+                self._idle_slaves.append(slave)
+                break
+            pass
+        else:
+            raise RuntimeError, 'unknown slave!'
         pass
 
     def _wait_busy_slaves(self):
